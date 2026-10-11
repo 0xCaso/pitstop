@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "agent-pitstop",
+  "version": "0.1.0",
+  "description": "Checkpoints long coding agent sessions and restarts them from a small context. Works with Claude Code.",
+  "files": [
+    ".claude-plugin/plugin.json",
+    "bin",
+    "hooks",
+    "pitstop/**/*.py",
+    "skills"
+  ],
+  "scripts": {
+    "test": "/usr/bin/python3 -m unittest discover -s tests -t .",
+    "validate": "claude plugin validate --strict .",
+    "prepublishOnly": "npm test && npm run validate"
+  },
+  "keywords": [
+    "agents",
+    "claude-code",
+    "claude-code-plugin",
+    "context",
+    "checkpoint",
+    "compact"
+  ],
+  "author": "Matteo Casonato",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xCaso/pitstop.git"
+  },
+  "homepage": "https://github.com/0xCaso/pitstop#readme",
+  "bugs": {
+    "url": "https://github.com/0xCaso/pitstop/issues"
+  },
+  "os": [
+    "darwin"
+  ]
+}
