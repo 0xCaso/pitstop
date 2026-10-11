@@ -1,7 +1,7 @@
 # pitstop
 
-A Claude Code plugin that restarts long sessions from a small checkpoint, so each turn stops re-reading a huge
-context.
+Restarts long coding agent sessions from a small checkpoint, so each turn stops re-reading a huge context.
+It works with Claude Code today, as a plugin; support for other agents is planned.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/context-dark.svg">
@@ -51,18 +51,19 @@ it skips.
 
 ## Install
 
-From GitHub, as a plugin marketplace:
+From the plugin marketplace on GitHub, which installs the [`agent-pitstop`](https://www.npmjs.com/package/agent-pitstop)
+package from npm:
 
 ```bash
-claude plugin marketplace add 0xCaso/claude-pitstop
-claude plugin install pitstop@claude-pitstop
+claude plugin marketplace add 0xCaso/pitstop
+claude plugin install pitstop@pitstop
 ```
 
 Or from a clone, for development (Claude Code loads it as `pitstop@skills-dir`):
 
 ```bash
-git clone https://github.com/0xCaso/claude-pitstop.git
-cd claude-pitstop
+git clone https://github.com/0xCaso/pitstop.git
+cd pitstop
 mkdir -p ~/.claude/skills && ln -sfn "$PWD" ~/.claude/skills/pitstop
 ```
 
@@ -81,7 +82,7 @@ Start a new session afterwards. pitstop does not edit your `settings.json`.
 
 The `/` menu lists the skill as `/pitstop:pitstop`.
 
-To turn the whole plugin off at once: `claude plugin disable pitstop@claude-pitstop` (or `pitstop@skills-dir` for
+To turn the whole plugin off at once: `claude plugin disable pitstop@pitstop` (or `pitstop@skills-dir` for
 a clone).
 
 ## Configuration
@@ -139,14 +140,15 @@ instruction. Checkpoints and session state files older than 30 days are deleted 
 /usr/bin/python3 -m unittest discover -s tests -t . -v
 claude plugin validate --strict .
 claude plugin test .
+npm publish                                     # runs the tests and the validation first
 /usr/bin/python3 assets/make_chart.py assets   # regenerate the chart
 ```
 
 ## Uninstall
 
 ```bash
-claude plugin uninstall pitstop@claude-pitstop
-claude plugin marketplace remove claude-pitstop
+claude plugin uninstall pitstop@pitstop
+claude plugin marketplace remove pitstop
 ```
 
 For a clone: `rm ~/.claude/skills/pitstop`. Delete `~/.claude/pitstop/` too if you do not need the checkpoints or
