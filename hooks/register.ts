@@ -55,7 +55,8 @@ async function restart($: Engine): Promise<void> {
     await $.command.run({ command: 'compact', args: `One-line summary: "${SUMMARY}"` })
     await $.prompt.submit({ text: SUMMARY })
   } catch {
-    await $.ui.toast('pitstop: automatic restart failed, run /clear and send any message')
+    // /compact keeps the session id, so SessionStart (source compact) picks the record up; /clear would not.
+    await $.ui.toast('pitstop: automatic restart failed, run /compact and send any message')
   }
 }
 
