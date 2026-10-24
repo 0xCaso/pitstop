@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "agent-pitstop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Checkpoints long coding agent sessions and restarts them from a small context. Works with Claude Code.",
   "files": [
     ".claude-plugin/plugin.json",
