@@ -85,6 +85,39 @@ class MarkPendingTest(CliTestCase):
         self.cli("gap", "missing the table")
         self.assertNotIn("cycle_id", read_events(self.layout)[-1])
 
+    def reread_checkpoint(self, *entries):
+        return "# cp\n\n## Next action\nGo.\n## Chat-only text\n—\n## Re-read\n%s\n" % "\n".join(entries)
+
+    def test_missing_reread_file_blocks_and_writes_nothing(self):
+        (self.tmp / "docs").mkdir()
+        code, out = self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp),
+                             stdin_text=self.reread_checkpoint("- `docs/plan.md:4` — the plan", "- `docs/b.md` — b"))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "🔋 pitstop · files under Re-read not found: docs/plan.md:4, docs/b.md\n")
+        self.assertFalse(self.layout.checkpoints_dir.exists() and any(self.layout.checkpoints_dir.iterdir()))
+        self.assertIsNone(self.consume())
+        self.assertEqual(read_events(self.layout), [])
+
+    def test_unchecked_entries_warn_and_register(self):
+        code, out = self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp),
+                             stdin_text=self.reread_checkpoint("- `S/a.md` — alias", "- the PR text"))
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("warning: not checked under Re-read: 2 entries\n"))
+        self.assertIsNotNone(consume_pending(self.layout, "s1", str(self.tmp), NOW, 10))
+
+    def test_done_event_carries_checkpoint_stats_and_kind(self):
+        (self.tmp / "notes.md").write_text("n", encoding="utf-8")
+        text = "# cp\n\n## Next action\nGo.\n## Chat-only text\nSee `notes.md`.\n## Re-read\n- `S/x` — alias\n"
+        code, _ = self.cli("mark-pending", "--stdin", "--kind", "other", "--cwd", str(self.tmp), stdin_text=text)
+        self.assertEqual(code, 0)
+        done = read_events(self.layout)[0]
+        self.assertEqual({k: done[k] for k in ("checkpoint_bytes", "sections_filled", "chat_text_filled",
+                                               "support_files", "unchecked_entries", "kind")},
+                         {"checkpoint_bytes": len(text.encode("utf-8")), "sections_filled": 3,
+                          "chat_text_filled": True, "support_files": 1, "unchecked_entries": 1, "kind": "other"})
+        self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp), stdin_text="# cp\n")
+        self.assertEqual(read_events(self.layout)[-1]["kind"], "unknown")
+
     def test_restart_mode_follows_the_entrypoint(self):
         checkpoint = self.tmp / "cp.md"
         checkpoint.write_text("# Checkpoint", encoding="utf-8")

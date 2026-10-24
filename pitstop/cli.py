@@ -20,6 +20,7 @@ from pitstop.claude.transcript import (
     read_session_title,
 )
 from pitstop.core.build import new_cycle_id
+from pitstop.core.checkpoint import analyze_checkpoint
 from pitstop.core.config import ConfigError, load_config, update_config
 from pitstop.core.fsutil import append_line
 from pitstop.core.log import log_event, read_events
@@ -116,17 +117,27 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         raise CliError("context not readable from the transcript (%s)" % type(exc).__name__) from None
     if tokens is None:
         raise CliError("context not readable from the transcript (no messages)")
+    cwd = args.cwd or read_last_cwd(str(transcript)) or os.getcwd()
     if args.stdin:
         text = read_text(ctx.stdin)
         if not text.strip():
             raise CliError("empty checkpoint")
-        checkpoint = write_checkpoint(ctx.layout, session, text, ctx.now)
+        checkpoint = None
     else:
         checkpoint = Path(args.checkpoint).expanduser()
         if not checkpoint.is_file():
             raise CliError("checkpoint not found: %s" % checkpoint)
         if checkpoint.stat().st_size == 0:
             raise CliError("empty checkpoint: %s" % checkpoint)
+        text = checkpoint.read_text(encoding="utf-8", errors="replace")
+    # Checked before anything is written: a checkpoint that cites files the resume cannot find is fixed first.
+    stats = analyze_checkpoint(text, cwd)
+    if stats.missing:
+        raise CliError("files under Re-read not found: %s" % ", ".join(stats.missing))
+    if stats.unchecked:
+        ctx.say("warning: not checked under Re-read: %d entries" % len(stats.unchecked))
+    if checkpoint is None:
+        checkpoint = write_checkpoint(ctx.layout, session, text, ctx.now)
     # SDK hosts (T3 Code) have no /clear: there the session compacts and resumes in place.
     if ctx.env.get(AUTO_RESTART_ENV) == "1":
         restart = "auto"
@@ -138,7 +149,7 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
     record = PendingRecord(
         checkpoint=str(checkpoint.resolve()),
         session_id=session,
-        cwd=args.cwd or read_last_cwd(str(transcript)) or os.getcwd(),
+        cwd=cwd,
         context_tokens=tokens,
         created_at=ctx.now,
         title=read_session_title(str(transcript)),
@@ -151,7 +162,9 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
     prune_old_files(ctx.layout, ctx.now, keep=Path(record.checkpoint))
     log_event(ctx.layout, "cli", "pitstop_done", session_id=session, context_tokens=tokens,
               checkpoint=record.checkpoint, cycle_id=cycle_id, host=ctx.env.get(ENTRYPOINT_ENV, "unknown"),
-              restart=restart)
+              restart=restart, kind=args.kind or "unknown", checkpoint_bytes=stats.bytes,
+              sections_filled=stats.sections_filled, chat_text_filled=stats.chat_text_filled,
+              support_files=stats.support_files, unchecked_entries=len(stats.unchecked))
     config, _ = load_config(ctx.layout)
     ctx.say("checkpoint registered: %s" % record.checkpoint)
     ctx.say("resume window: %d minutes" % config.resume_window_minutes)
@@ -238,6 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--stdin", action="store_true", help="read the checkpoint text from stdin")
     mark.add_argument("--cwd")
     mark.add_argument("--plan")
+    mark.add_argument("--kind", choices=["code", "other"], help="code: the work lives in the repo's files")
     mark.add_argument("--session")
     mark.add_argument("--transcript")
     gap = sub.add_parser("gap", help="record something the checkpoint was missing")
