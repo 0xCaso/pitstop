@@ -19,6 +19,7 @@ from pitstop.claude.transcript import (
     read_last_cwd,
     read_session_title,
 )
+from pitstop.core.build import new_cycle_id
 from pitstop.core.config import ConfigError, load_config, update_config
 from pitstop.core.fsutil import append_line
 from pitstop.core.log import log_event, read_events
@@ -131,6 +132,9 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         restart = "auto"
     else:
         restart = "compact" if ctx.env.get(ENTRYPOINT_ENV, "").startswith("sdk") else "clear"
+    # The cycle the hook opened with its request; a pitstop nobody requested (/pitstop now) starts its own.
+    state = load_state(ctx.layout, session)
+    cycle_id = state.cycle_id if state.requested_at_tokens is not None and state.cycle_id else new_cycle_id()
     record = PendingRecord(
         checkpoint=str(checkpoint.resolve()),
         session_id=session,
@@ -141,11 +145,13 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         plan=args.plan,
         project_dir=str(transcript.parent),
         restart=restart,
+        cycle_id=cycle_id,
     )
     mark_pending(ctx.layout, record)
     prune_old_files(ctx.layout, ctx.now, keep=Path(record.checkpoint))
     log_event(ctx.layout, "cli", "pitstop_done", session_id=session, context_tokens=tokens,
-              checkpoint=record.checkpoint)
+              checkpoint=record.checkpoint, cycle_id=cycle_id, host=ctx.env.get(ENTRYPOINT_ENV, "unknown"),
+              restart=restart)
     config, _ = load_config(ctx.layout)
     ctx.say("checkpoint registered: %s" % record.checkpoint)
     ctx.say("resume window: %d minutes" % config.resume_window_minutes)
@@ -161,7 +167,7 @@ def cmd_gap(args: argparse.Namespace, ctx: Ctx) -> None:
     session = _session_id(args, ctx)
     entry = {"ts": round(ctx.now, 3), "session_id": session, "text": " ".join(args.text).strip()}
     append_line(ctx.layout.gaps, json.dumps(entry, ensure_ascii=False))
-    log_event(ctx.layout, "cli", "gap", session_id=session)
+    log_event(ctx.layout, "cli", "gap", session_id=session, cycle_id=load_state(ctx.layout, session).cycle_id)
     ctx.say("🔋 checkpoint gap recorded")
 
 

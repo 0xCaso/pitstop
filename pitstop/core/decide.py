@@ -27,6 +27,9 @@ def segment_start(config: Config, state: SessionState, context_tokens: Optional[
     """A context back under the threshold was compacted or cleared outside pitstop: a new segment starts, so the
     next request comes at the threshold again, not at the old request plus the step."""
     if context_tokens is not None and context_tokens < config.threshold_tokens:
+        if state.requested_at_tokens is not None:
+            # The requested cycle ended without a pitstop. A resumed segment (no request yet) keeps its cycle id.
+            state.cycle_id = None
         state.requested_at_tokens = None
 
 

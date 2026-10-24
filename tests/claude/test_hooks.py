@@ -352,6 +352,70 @@ class FailOpenTest(HookTestCase):
         self.assertIsNotNone(self.call_hook("stop", notifier=broken))
 
 
+class CycleIdHookTest(PendingMixin, HookTestCase):
+    """One cycle_id from the first request of a segment to the resume_base of the session that resumes it."""
+
+    def events(self, action):
+        return [e for e in read_events(self.layout) if e["action"] == action]
+
+    def test_request_resume_and_resume_base_share_the_cycle_id(self):
+        from pitstop.cli import main
+        import io
+        self.add_turn(212345)
+        with mock.patch.dict("os.environ", {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
+            self.assertIsNotNone(self.call_hook("stop"))
+        self.add_turn(262345)
+        self.assertIsNotNone(self.call_hook("stop"))
+        requests = self.events("request")
+        cycle = requests[0]["cycle_id"]
+        self.assertRegex(cycle, r"^[0-9a-f]{12}$")
+        self.assertEqual(requests[1]["cycle_id"], cycle)
+        self.assertEqual(requests[0]["host"], "cli")
+        projects = self.tmp / "projects"
+        write_jsonl(projects / "-work-repo" / "s1.jsonl", [user_line(), assistant_line()])
+        code = main(["mark-pending", "--stdin", "--cwd", "/work/repo"], stdin=io.StringIO("# cp\n"),
+                    stdout=io.StringIO(), env={"CLAUDE_CODE_SESSION_ID": "s1"}, layout=self.layout,
+                    projects_dir=projects, now=NOW)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.events("pitstop_done")[0]["cycle_id"], cycle)
+        fresh = write_jsonl(self.tmp / "s2.jsonl", [user_line()])
+        self.assertIsNotNone(self.call_hook("user-prompt-submit", session_id="s2", transcript_path=str(fresh)))
+        self.assertEqual(self.events("resume")[0]["cycle_id"], cycle)
+        self.add_turn(74000, path=fresh)
+        self.assertIsNone(self.call_hook("stop", session_id="s2", transcript_path=str(fresh)))
+        self.assertEqual(self.events("resume_base")[0]["cycle_id"], cycle)
+        main(["gap", "the table"], stdin=io.StringIO(""), stdout=io.StringIO(),
+             env={"CLAUDE_CODE_SESSION_ID": "s2"}, layout=self.layout, projects_dir=projects, now=NOW)
+        self.assertEqual(self.events("gap")[0]["cycle_id"], cycle)
+        self.add_turn(205000, path=fresh)
+        self.assertIsNotNone(self.call_hook("stop", session_id="s2", transcript_path=str(fresh)))
+        later = self.events("request")[-1]["cycle_id"]
+        self.assertRegex(later, r"^[0-9a-f]{12}$")
+        self.assertNotEqual(later, cycle)
+
+    def test_record_without_cycle_id_still_resumes(self):
+        checkpoint = self.tmp / "cp.md"
+        checkpoint.write_text("# Checkpoint", encoding="utf-8")
+        self.layout.pending_dir.mkdir(parents=True)
+        old = {"checkpoint": str(checkpoint), "session_id": "s0", "cwd": "/work/repo", "context_tokens": 212000,
+               "created_at": NOW - 60, "title": None, "plan": None, "project_dir": None, "restart": "clear"}
+        (self.layout.pending_dir / "0000000000001-aaaaaaaa.json").write_text(json.dumps(old), encoding="utf-8")
+        fresh = write_jsonl(self.tmp / "s2.jsonl", [user_line()])
+        self.assertIsNotNone(self.call_hook("user-prompt-submit", session_id="s2", transcript_path=str(fresh)))
+        resume = self.events("resume")[0]
+        self.assertNotIn("cycle_id", resume)
+
+    def test_dropped_and_expired_records_log_their_cycle_id(self):
+        self.add_turn(212000)
+        self.pending(restart="compact", cycle_id="c0ffee000001")
+        self.assertIsNone(self.call_hook("user-prompt-submit", prompt="ok, continua"))
+        self.assertEqual(self.events("pending_dropped")[0]["cycle_id"], "c0ffee000001")
+        self.pending(session_id="s0", cycle_id="c0ffee000002", created_at=NOW - 3 * 60 * 60)
+        fresh = write_jsonl(self.tmp / "s2.jsonl", [user_line()])
+        self.assertIsNotNone(self.call_hook("user-prompt-submit", session_id="s2", transcript_path=str(fresh)))
+        self.assertEqual(self.events("resume_expired")[0]["cycle_id"], "c0ffee000002")
+
+
 class CompactResumeHookTest(PendingMixin, HookTestCase):
     """After /compact the same session restarts from its own checkpoint (SessionStart, source compact)."""
 
