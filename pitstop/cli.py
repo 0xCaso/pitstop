@@ -23,7 +23,7 @@ from pitstop.claude.transcript import (
 from pitstop.core.build import new_cycle_id
 from pitstop.core.checkpoint import analyze_checkpoint
 from pitstop.core.config import ConfigError, load_config, update_config
-from pitstop.core.cycles import Cycle, build_cycles
+from pitstop.core.cycles import Cycle, build_cycles, next_start
 from pitstop.core.fsutil import append_line, atomic_write_text
 from pitstop.core.log import log_event, read_events
 from pitstop.core.metrics import append_rows, cycle_row, import_audit, load_rows, summary
@@ -230,13 +230,6 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
                                                              messages.k(int(statistics.median(bases)))))
 
 
-def _next_request(cycles: List[Cycle], session: Optional[str], after: float) -> Optional[float]:
-    """When the session was next asked for a pitstop after `after`; None if it never was."""
-    times = [c.first_request_ts for c in cycles
-             if c.session == session and c.first_request_ts is not None and c.first_request_ts > after]
-    return min(times) if times else None
-
-
 class _Transcripts:
     def __init__(self, dirs: List[Path]) -> None:
         self.dirs = dirs
@@ -256,12 +249,12 @@ def _report_row(cycle: Cycle, cycles: List[Cycle], transcripts: _Transcripts) ->
     start = cycle.first_request_ts
     asked = transcripts.get(cycle.session)
     if start is not None and asked is not None:
-        end = cycle.done_ts if cycle.done_ts is not None else _next_request(cycles, cycle.session, start)
+        end = cycle.done_ts if cycle.done_ts is not None else next_start(cycles, cycle.session, start)
         row["skips"] = skip_categories(asked, start, end)
     resumed = transcripts.get(cycle.resume_session)
     if cycle.resume_ts is not None and resumed is not None:
         row["post_calls"] = calls_after(resumed, cycle.resume_ts,
-                                        _next_request(cycles, cycle.resume_session, cycle.resume_ts))
+                                        next_start(cycles, cycle.resume_session, cycle.resume_ts))
     return row
 
 

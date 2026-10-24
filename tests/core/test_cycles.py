@@ -25,10 +25,12 @@ class BuildCyclesTest(unittest.TestCase):
         self.assertEqual(len(cycles), 1)
         return cycles[0]
 
-    def test_resumed_cycle_with_resume_base_is_closed(self):
-        cycle = self.one([REQUEST, DONE, ev("resume", T + 90, session_id="s2"),
-                          ev("resume_base", T + 100, session_id="s2", resume_base=70000),
-                          ev("gap", T + 110, session_id="s2")])
+    def test_resumed_cycle_closes_when_the_resumed_session_is_asked_again(self):
+        events = [REQUEST, DONE, ev("resume", T + 90, session_id="s2"),
+                  ev("resume_base", T + 100, session_id="s2", resume_base=70000),
+                  ev("gap", T + 110, session_id="s2")]
+        self.assertFalse(self.one(events).closed)  # the resumed session is still going: calls and gaps still grow
+        cycle = build_cycles(events + [ev("request", T + 200, cycle="c2", session_id="s2")], T + 300)[0]
         self.assertEqual((cycle.outcome, cycle.closed), ("resumed", True))
         self.assertEqual((cycle.cycle_id, cycle.v, cycle.skill, cycle.host, cycle.kind), ("c1", "0.2.0", "abcd1234",
                                                                                       "cli", "code"))
@@ -39,6 +41,13 @@ class BuildCyclesTest(unittest.TestCase):
         self.assertEqual((cycle.resume_ts, cycle.resume_session, cycle.resume_base, cycle.gaps),
                          (T + 90, "s2", 70000, 1))
         self.assertEqual(cycle.session, "s1")
+
+    def test_resumed_cycle_closes_at_a_manual_pitstop_of_the_resumed_session(self):
+        events = [REQUEST, DONE, ev("resume", T + 90, session_id="s2"),
+                  ev("pitstop_done", T + 200, cycle="c2", session_id="s2"),
+                  ev("request", T + 250, cycle="c3", session_id="s9")]
+        self.assertTrue(build_cycles(events, T + 300)[0].closed)
+        self.assertFalse(build_cycles(events[:3] + events[4:], T + 300)[0].closed)
 
     def test_resumed_without_resume_base_closes_after_a_day(self):
         events = [REQUEST, DONE, ev("resume", T + 90, session_id="s2")]

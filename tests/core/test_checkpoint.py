@@ -62,3 +62,19 @@ class AnalyzeCheckpointTest(TempLayoutTestCase):
         stats = analyze_checkpoint(text, str(self.cwd))
         self.assertEqual((stats.missing, stats.unchecked), ([], []))
         self.assertEqual(stats.sections_filled, 2)
+
+    def test_headings_pasted_inside_a_section_or_a_fence_are_not_sections(self):
+        text = ("# pitstop checkpoint — x\n\n## Goal\nship\n\n## Chat-only text\nMy last answer:\n\n"
+                "## Summary of options\n- A\n\n```markdown\n## Re-read\n- `nowhere/missing.md` — example\n```\n\n"
+                "## Re-read\n—\n\n## Open questions\n—\n")
+        stats = analyze_checkpoint(text, str(self.tmp))
+        self.assertEqual((stats.sections_filled, stats.chat_text_filled), (2, True))
+        self.assertEqual((stats.missing, stats.unchecked), ([], []))
+
+    def test_template_titles_match_the_skill_template(self):
+        from pitstop.core.checkpoint import TEMPLATE_TITLES
+        from tests.helpers import REPO_ROOT
+        text = (REPO_ROOT / "skills" / "pitstop" / "SKILL.md").read_text(encoding="utf-8")
+        template = text.split("```markdown\n# pitstop checkpoint", 1)[1].split("```", 1)[0]
+        titles = {line[3:].strip() for line in template.splitlines() if line.startswith("## ")}
+        self.assertEqual(titles, TEMPLATE_TITLES)

@@ -6,6 +6,9 @@ from typing import Dict, List
 
 CHAT_TEXT = "Chat-only text"
 REREAD = "Re-read"
+# The section titles of the checkpoint template in SKILL.md, in English in every language.
+TEMPLATE_TITLES = frozenset({"Goal", "Current state", "Next action", CHAT_TEXT, "Decisions made", "User preferences",
+                             "Discarded", REREAD, "Unsaved or uncommitted work", "Open questions", "Suggested skills"})
 EMPTY = "—"
 _BACKTICKS = re.compile(r"`([^`]+)`")
 _LINE_SUFFIX = re.compile(r":\d+(-\d+)?$")
@@ -23,15 +26,23 @@ class CheckpointStats:
 
 
 def _sections(text: str) -> Dict[str, str]:
-    """`## <title>` -> body. A later section with the same title wins."""
+    """`## <title>` -> body. A later section with the same title wins. Lines inside ``` fences are body. Once a
+    template title has been seen, only template titles start a section: a heading pasted into Chat-only text
+    stays in its body. Checkpoints with no template title (older ones, titles in another language) split on
+    every `## ` line."""
     sections: Dict[str, str] = {}
     title = None
     body: List[str] = []
+    fenced = templated = False
     for line in text.splitlines():
-        if line.startswith("## "):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        heading = line[3:].strip() if line.startswith("## ") and not fenced else None
+        if heading is not None and (heading in TEMPLATE_TITLES or not templated):
             if title is not None:
                 sections[title] = "\n".join(body)
-            title, body = line[3:].strip(), []
+            title, body = heading, []
+            templated = templated or heading in TEMPLATE_TITLES
         elif title is not None:
             body.append(line)
     if title is not None:
