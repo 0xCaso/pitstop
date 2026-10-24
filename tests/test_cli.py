@@ -41,6 +41,14 @@ class ToggleCommandsTest(CliTestCase):
         self.assertEqual(self.cli("notify", "off"), (0, "🔋 pitstop notifications off\n"))
         self.assertFalse(load_config(self.layout)[0].notify)
 
+    def test_metrics_toggle_and_status_line(self):
+        self.assertIn("metrics: off\n", self.cli("status")[1])
+        self.assertEqual(self.cli("metrics", "on"), (0, "🔋 pitstop metrics on\n"))
+        self.assertTrue(load_config(self.layout)[0].metrics)
+        self.assertIn("metrics: on\n", self.cli("status")[1])
+        self.assertEqual(self.cli("metrics", "off"), (0, "🔋 pitstop metrics off\n"))
+        self.assertFalse(load_config(self.layout)[0].metrics)
+
     def test_off_here_excludes_current_session_only(self):
         self.assertEqual(self.cli("off-here"), (0, "🔋 pitstop off in this session\n"))
         self.assertTrue(load_state(self.layout, "s1").excluded)
@@ -200,6 +208,7 @@ class StatusAndGapTest(CliTestCase):
         self.assertEqual(out.splitlines(), [
             "🔋 pitstop: on",
             "notifications: on",
+            "metrics: off",
             "current context: 212K · threshold 200K",
             "pitstops: 1 · real resumes: 2 · gaps: 1",
             "real resume size: last 90K · median 80K",

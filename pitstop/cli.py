@@ -104,6 +104,11 @@ def cmd_notify(args: argparse.Namespace, ctx: Ctx) -> None:
     ctx.say("🔋 pitstop notifications %s" % args.state)
 
 
+def cmd_metrics(args: argparse.Namespace, ctx: Ctx) -> None:
+    update_config(ctx.layout, metrics=args.state == "on")
+    ctx.say("🔋 pitstop metrics %s" % args.state)
+
+
 def cmd_new_checkpoint(args: argparse.Namespace, ctx: Ctx) -> None:
     ctx.say(str(new_checkpoint_path(ctx.layout, _session_id(args, ctx), ctx.now)))
 
@@ -206,6 +211,7 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
     else:
         ctx.say("🔋 pitstop: on")
     ctx.say("notifications: %s" % ("on" if config.notify else "off"))
+    ctx.say("metrics: %s" % ("on" if config.metrics else "off"))
     ctx.say("current context: %s · threshold %s" % (_current_context(args, ctx, session),
                                                  messages.k(config.threshold_tokens)))
     events = read_events(ctx.layout)
@@ -224,6 +230,7 @@ _COMMANDS = {
     "off": cmd_off,
     "off-here": cmd_off_here,
     "notify": cmd_notify,
+    "metrics": cmd_metrics,
     "status": cmd_status,
     "new-checkpoint": cmd_new_checkpoint,
     "mark-pending": cmd_mark_pending,
@@ -241,6 +248,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("off-here", help="disable pitstop in the current session").add_argument("--session")
     notify = sub.add_parser("notify", help="macOS notifications")
     notify.add_argument("state", choices=["on", "off"])
+    metrics = sub.add_parser("metrics", help="the daily local report and metrics.jsonl (off by default)")
+    metrics.add_argument("state", choices=["on", "off"])
     status = sub.add_parser("status", help="state, current context and pilot numbers")
     status.add_argument("--session")
     status.add_argument("--transcript")
