@@ -527,3 +527,59 @@ class CompactGuardHookTest(PendingMixin, HookTestCase):
             with self.subTest(message=message):
                 self.assertIsNone(self.send(message))
         self.assertIsNone(self.call_hook("pre-tool-use", tool_name="mcp__t3-code__t3_thread_send"))
+
+
+class DailyReportTest(HookTestCase):
+    """SessionStart starts `pitstop report --quiet` in the background, at most once a day, only with metrics on."""
+
+    def setUp(self):
+        super().setUp()
+        self.spawned = []
+
+    def spawn(self, argv):
+        self.spawned.append(argv)
+
+    def start(self, now=NOW, spawn=None):
+        from pitstop.claude.hooks import maybe_start_daily_report
+        from pitstop.core.config import load_config
+        return maybe_start_daily_report(self.layout, load_config(self.layout)[0], now, spawn or self.spawn)
+
+    def test_daily_report_starts_once_a_day_only_with_metrics_on(self):
+        self.assertFalse(self.start())
+        self.assertEqual(self.spawned, [])
+        update_config(self.layout, metrics=True)
+        self.assertTrue(self.start())
+        self.assertEqual(len(self.spawned), 1)
+        self.assertEqual(self.spawned[0][-2:], ["report", "--quiet"])
+        self.assertFalse(self.start(now=NOW + 23 * 3600))
+        self.assertTrue(self.start(now=NOW + 25 * 3600))
+        self.assertEqual(len(self.spawned), 2)
+
+    def test_two_concurrent_starts_spawn_once(self):
+        update_config(self.layout, metrics=True)
+        self.assertEqual([self.start(), self.start()], [True, False])
+        self.assertEqual(len(self.spawned), 1)
+
+    def test_spawn_failure_fails_open(self):
+        update_config(self.layout, metrics=True)
+
+        def broken(argv):
+            raise OSError("no fork")
+
+        self.assertFalse(self.start(spawn=broken))
+        with mock.patch("pitstop.claude.hooks._spawn_report", broken):
+            self.assertIsNone(self.call_hook("session-start", source="startup", now=NOW + 25 * 3600))
+
+    def test_session_start_runs_it_for_any_source_without_changing_the_resume(self):
+        update_config(self.layout, metrics=True)
+        self.add_turn(212000)
+        later = NOW + 25 * 3600
+        mark_pending(self.layout, PendingRecord(checkpoint=str(self.tmp / "cp.md"), session_id="s1",
+                                                cwd="/work/repo", context_tokens=212000, created_at=later - 60,
+                                                restart="compact"))
+        (self.tmp / "cp.md").write_text("# cp\n", encoding="utf-8")
+        with mock.patch("pitstop.claude.hooks._spawn_report", self.spawn):
+            self.assertIsNone(self.call_hook("session-start", source="startup"))
+            out = self.call_hook("session-start", source="compact", now=later)
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertEqual(len(self.spawned), 2)
