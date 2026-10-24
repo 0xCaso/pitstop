@@ -13,6 +13,7 @@ class Cycle:
     v: str
     skill: str
     host: Optional[str] = None
+    session: Optional[str] = None  # the session that was asked for the pitstop (or made it)
     kind: Optional[str] = None
     first_request_ts: Optional[float] = None
     request_tokens: Optional[int] = None
@@ -41,6 +42,8 @@ def _apply(cycle: Cycle, event: Dict[str, Any]) -> None:
     ts = _number(event.get("ts"))
     if cycle.host is None and isinstance(event.get("host"), str):
         cycle.host = event["host"]
+    if cycle.session is None and action in ("request", "pitstop_done") and isinstance(event.get("session_id"), str):
+        cycle.session = event["session_id"]
     if action == "request":
         cycle.requests += 1
         if cycle.first_request_ts is None:
