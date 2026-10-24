@@ -1,8 +1,10 @@
 """Hook handlers: glue between Claude Code events and the pitstop core. Every error fails open."""
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from pitstop.claude import messages
 from pitstop.claude.hookio import HookInput, HookInputError, build_output, parse_hook_input
@@ -11,7 +13,7 @@ from pitstop.claude.transcript import TranscriptSchemaError, read_context_tokens
 from pitstop.core.build import new_cycle_id
 from pitstop.core.config import Config, load_config, should_show_config_notice
 from pitstop.core.decide import REQUEST, Event, decide, segment_start
-from pitstop.core.fsutil import LockTimeout
+from pitstop.core.fsutil import LockTimeout, atomic_write_text, file_lock
 from pitstop.core.log import log_event
 from pitstop.core.paths import Layout
 from pitstop.core.state import SessionState, locked_state
@@ -29,6 +31,7 @@ CLI_PATH = REPO_ROOT / "bin" / "pitstop"
 SKILL_PATH = REPO_ROOT / "skills" / "pitstop" / "SKILL.md"
 
 Notifier = Callable[[str, str], None]
+REPORT_EVERY_SECONDS = 24 * 60 * 60
 
 # log name -> (hookEventName in the output, builder of the instructions for the model)
 _REQUESTS = {
@@ -220,12 +223,47 @@ def _drop_unused_in_place_record(inp: HookInput, layout: Layout) -> None:
                   cycle_id=record.cycle_id)
 
 
+def _spawn_report(argv: List[str]) -> None:
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def _stamp(layout: Layout) -> Optional[float]:
+    try:
+        return float(layout.report_stamp.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def maybe_start_daily_report(layout: Layout, config: Config, now: float,
+                             spawn: Callable[[List[str]], None]) -> bool:
+    """Start `pitstop report --quiet` in the background if metrics is on and the last run is missing or older
+    than a day. The stamp is re-read and rewritten under its lock, so two sessions starting together spawn
+    it once. Never raises: False when nothing was started."""
+    if not config.metrics:
+        return False
+    try:
+        with file_lock(layout.base / "report-last-run.lock", timeout=0.2):
+            last = _stamp(layout)
+            if last is not None and now - last < REPORT_EVERY_SECONDS:
+                return False
+            atomic_write_text(layout.report_stamp, "%d\n" % int(now))
+            spawn([sys.executable, str(CLI_PATH), "report", "--quiet"])
+        return True
+    except Exception:  # fail-open: the session starts whatever happens to the report
+        return False
+
+
 def _handle_session_start(inp: HookInput, layout: Layout, notifier: Notifier, now: float) -> Optional[str]:
-    """After /compact (the restart available where /clear is not, e.g. T3 Code): the same session
+    """Any source: the daily report, at most once a day (see maybe_start_daily_report).
+    After /compact (the restart available where /clear is not, e.g. T3 Code): the same session
     picks up its own checkpoint. Expired records are left alone: a fresh session announces them."""
-    if inp.source != "compact" or inp.agent_id or not has_pending(layout):
+    if inp.agent_id:
         return None
     config, _ = load_config(layout)
+    maybe_start_daily_report(layout, config, now, _spawn_report)
+    if inp.source != "compact" or not has_pending(layout):
+        return None
     record = consume_pending(layout, inp.session_id, inp.cwd, now, config.resume_window_minutes,
                              same_session_only=True)
     if record is None:
