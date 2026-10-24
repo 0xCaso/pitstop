@@ -71,10 +71,24 @@ def _apply(cycle: Cycle, event: Dict[str, Any]) -> None:
         cycle.expired = True
 
 
-def _settle(cycle: Cycle, now: float) -> None:
+def _start(cycle: Cycle) -> Optional[float]:
+    """When a cycle began: its first request, or its checkpoint for a pitstop nobody requested."""
+    return cycle.first_request_ts if cycle.first_request_ts is not None else cycle.done_ts
+
+
+def next_start(cycles: List[Cycle], session: Optional[str], after: float) -> Optional[float]:
+    """When the session's next cycle began after `after`; None if it has none yet."""
+    starts = (_start(c) for c in cycles if c.session == session)
+    times = [start for start in starts if start is not None and start > after]
+    return min(times) if times else None
+
+
+def _settle(cycle: Cycle, cycles: List[Cycle], now: float) -> None:
     if cycle.resume_ts is not None:
+        # Closed once the resumed session reached its next pitstop (its calls and gaps are final), or after a day.
         cycle.outcome = "resumed"
-        cycle.closed = cycle.resume_base is not None or now - cycle.resume_ts > DAY_SECONDS
+        cycle.closed = (next_start(cycles, cycle.resume_session, cycle.resume_ts) is not None
+                        or now - cycle.resume_ts > DAY_SECONDS)
         return
     if cycle.dropped:
         cycle.outcome = "dropped"
@@ -102,6 +116,7 @@ def build_cycles(events: List[Dict[str, Any]], now: float) -> List[Cycle]:
             cycle = cycles[cycle_id] = Cycle(cycle_id=cycle_id, v=str(event.get("v", "unknown")),
                                              skill=str(event.get("skill", "unknown")))
         _apply(cycle, event)
-    for cycle in cycles.values():
-        _settle(cycle, now)
-    return list(cycles.values())
+    built = list(cycles.values())
+    for cycle in built:
+        _settle(cycle, built, now)
+    return built
