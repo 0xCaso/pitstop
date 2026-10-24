@@ -5,12 +5,13 @@ import os
 import statistics
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Mapping, Optional, TextIO
+from typing import Any, Dict, List, Mapping, Optional, TextIO
 
 from pitstop.claude import messages
 from pitstop.claude.hooks import run_hook
+from pitstop.claude.report_scan import calls_after, projects_dirs, skip_categories
 from pitstop.claude.transcript import (
     TranscriptSchemaError,
     default_projects_dir,
@@ -22,8 +23,10 @@ from pitstop.claude.transcript import (
 from pitstop.core.build import new_cycle_id
 from pitstop.core.checkpoint import analyze_checkpoint
 from pitstop.core.config import ConfigError, load_config, update_config
-from pitstop.core.fsutil import append_line
+from pitstop.core.cycles import Cycle, build_cycles
+from pitstop.core.fsutil import append_line, atomic_write_text
 from pitstop.core.log import log_event, read_events
+from pitstop.core.metrics import append_rows, cycle_row, import_audit, load_rows, summary
 from pitstop.core.paths import Layout, pitstop_home
 from pitstop.core.state import load_state, locked_state
 from pitstop.core.store import PendingRecord, mark_pending, new_checkpoint_path, prune_old_files, write_checkpoint
@@ -62,6 +65,8 @@ class Ctx:
     env: Mapping[str, str]
     projects_dir: Path
     now: float
+    # Where `report` looks for transcripts: every Claude profile's projects folder.
+    report_dirs: List[Path] = field(default_factory=list)
 
     def say(self, text: str) -> None:
         write_text(self.stdout, text + "\n")
@@ -225,6 +230,62 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
                                                              messages.k(int(statistics.median(bases)))))
 
 
+def _next_request(cycles: List[Cycle], session: Optional[str], after: float) -> Optional[float]:
+    """When the session was next asked for a pitstop after `after`; None if it never was."""
+    times = [c.first_request_ts for c in cycles
+             if c.session == session and c.first_request_ts is not None and c.first_request_ts > after]
+    return min(times) if times else None
+
+
+class _Transcripts:
+    def __init__(self, dirs: List[Path]) -> None:
+        self.dirs = dirs
+        self.found: Dict[str, Optional[Path]] = {}
+
+    def get(self, session: Optional[str]) -> Optional[Path]:
+        if not session:
+            return None
+        if session not in self.found:
+            self.found[session] = next((path for path in (find_transcript(session, d) for d in self.dirs)
+                                        if path is not None), None)
+        return self.found[session]
+
+
+def _report_row(cycle: Cycle, cycles: List[Cycle], transcripts: _Transcripts) -> Dict[str, Any]:
+    row = cycle_row(cycle)
+    start = cycle.first_request_ts
+    asked = transcripts.get(cycle.session)
+    if start is not None and asked is not None:
+        end = cycle.done_ts if cycle.done_ts is not None else _next_request(cycles, cycle.session, start)
+        row["skips"] = skip_categories(asked, start, end)
+    resumed = transcripts.get(cycle.resume_session)
+    if cycle.resume_ts is not None and resumed is not None:
+        row["post_calls"] = calls_after(resumed, cycle.resume_ts,
+                                        _next_request(cycles, cycle.resume_session, cycle.resume_ts))
+    return row
+
+
+def cmd_report(args: argparse.Namespace, ctx: Ctx) -> None:
+    added = 0
+    if args.import_audit:
+        try:
+            added += append_rows(ctx.layout, import_audit(Path(args.import_audit).expanduser()))
+        except (OSError, ValueError) as exc:
+            raise CliError("audit not readable: %s (%s)" % (args.import_audit, type(exc).__name__)) from None
+    stored = {row["cycle_id"] for row in load_rows(ctx.layout)}
+    cycles = build_cycles(read_events(ctx.layout), ctx.now)
+    transcripts = _Transcripts(ctx.report_dirs)
+    rows = [_report_row(c, cycles, transcripts) for c in cycles if c.closed and c.cycle_id not in stored]
+    added += append_rows(ctx.layout, rows)
+    atomic_write_text(ctx.layout.report_stamp, "%d\n" % int(ctx.now))
+    if args.quiet:
+        return
+    all_rows = load_rows(ctx.layout)
+    ctx.say("🔋 pitstop report · %d new cycles · %d in metrics.jsonl" % (added, len(all_rows)))
+    for line in summary(all_rows):
+        ctx.say(line)
+
+
 _COMMANDS = {
     "on": cmd_on,
     "off": cmd_off,
@@ -235,6 +296,7 @@ _COMMANDS = {
     "new-checkpoint": cmd_new_checkpoint,
     "mark-pending": cmd_mark_pending,
     "gap": cmd_gap,
+    "report": cmd_report,
 }
 
 
@@ -266,6 +328,9 @@ def build_parser() -> argparse.ArgumentParser:
     gap = sub.add_parser("gap", help="record something the checkpoint was missing")
     gap.add_argument("text", nargs="+")
     gap.add_argument("--session")
+    report = sub.add_parser("report", help="rebuild the pitstop cycles, add the closed ones to metrics.jsonl")
+    report.add_argument("--quiet", action="store_true", help="update metrics.jsonl, print nothing")
+    report.add_argument("--import-audit", metavar="PATH", help="first import the cycles of an audit-data.json")
     return parser
 
 
@@ -290,7 +355,8 @@ def main(argv: List[str], stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout
     args = build_parser().parse_args(argv)
     env = os.environ if env is None else env
     ctx = Ctx(layout, stdin, stdout, env, projects_dir or default_projects_dir(env),
-              time.time() if now is None else now)
+              time.time() if now is None else now,
+              [projects_dir] if projects_dir else projects_dirs(env, Path.home()))
     try:
         _COMMANDS[args.command](args, ctx)
     except (CliError, ConfigError) as exc:

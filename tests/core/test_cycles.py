@@ -38,6 +38,7 @@ class BuildCyclesTest(unittest.TestCase):
                                             "support_files": 1, "unchecked_entries": 2})
         self.assertEqual((cycle.resume_ts, cycle.resume_session, cycle.resume_base, cycle.gaps),
                          (T + 90, "s2", 70000, 1))
+        self.assertEqual(cycle.session, "s1")
 
     def test_resumed_without_resume_base_closes_after_a_day(self):
         events = [REQUEST, DONE, ev("resume", T + 90, session_id="s2")]

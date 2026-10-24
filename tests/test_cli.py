@@ -4,7 +4,9 @@ from pathlib import Path
 
 from pitstop.cli import main
 from pitstop.core.config import load_config
+from pitstop.core.fsutil import append_line
 from pitstop.core.log import log_event, read_events
+from pitstop.core.metrics import load_rows
 from pitstop.core.state import load_state
 from pitstop.core.store import consume_pending
 from tests.helpers import NOW, TempLayoutTestCase, assistant_line, user_line, write_jsonl
@@ -221,3 +223,86 @@ class StatusAndGapTest(CliTestCase):
         self.cli("off-here")
         self.assertIn("🔋 pitstop: off in this session", self.cli("status")[1])
         self.assertIn("current context: not available", self.cli("status", env={})[1])
+
+
+def _iso(ts):
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+
+def _event(action, ts, cycle, session, v="0.2.0", **fields):
+    entry = {"ts": ts, "event": "x", "action": action, "v": v, "skill": "abcd1234", "session_id": session,
+             "cycle_id": cycle}
+    entry.update(fields)
+    return json.dumps(entry)
+
+
+def _said(text, ts, message_id, session):
+    return assistant_line(message_id=message_id, sessionId=session, timestamp=_iso(ts),
+                          message={"id": message_id, "model": "claude-opus-5", "role": "assistant",
+                                   "content": [{"type": "text", "text": text}],
+                                   "usage": {"input_tokens": 1, "output_tokens": 1}})
+
+
+class ReportTest(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        lines = [
+            _event("request", NOW - 3000, "c1", "s1", context_tokens=210000, host="cli"),
+            _event("pitstop_done", NOW - 2900, "c1", "s1", context_tokens=200000, restart="clear", kind="code",
+                   checkpoint_bytes=3000, sections_filled=8, chat_text_filled=True, support_files=0),
+            _event("resume", NOW - 2800, "c1", "s2"),
+            _event("resume_base", NOW - 2790, "c1", "s2", resume_base=60000),
+            _event("gap", NOW - 2700, "c1", "s2"),
+            _event("pitstop_done", NOW - 2000, "c3", "s3", v="0.2.1", context_tokens=150000, restart="compact"),
+            _event("pending_dropped", NOW - 1990, "c3", "s3", v="0.2.1"),
+            _event("request", NOW - 10, "c2", "s2", context_tokens=205000),
+        ]
+        for line in lines:
+            append_line(self.layout.log, line)
+        write_jsonl(self.projects / "-work-repo" / "s1.jsonl", [
+            _said("🔋 **pitstop** · skipped: debugging — half-way through a failing test", NOW - 2990, "m1", "s1"),
+            _said("🔋 **pitstop** · skipped: other — after the pitstop", NOW - 2850, "m2", "s1"),
+        ])
+        write_jsonl(self.projects / "-work-repo" / "s2.jsonl", [
+            _said("before the resume", NOW - 2850, "n0", "s2"),
+            _said("one", NOW - 2795, "n1", "s2"),
+            _said("two", NOW - 2700, "n2", "s2"),
+            _said("three", NOW - 2600, "n3", "s2"),
+            _said("after the next request", NOW - 5, "n4", "s2"),
+        ])
+
+    def test_report_writes_closed_cycles_once_and_prints_summary_by_version(self):
+        code, out = self.cli("report")
+        self.assertEqual(code, 0)
+        rows = {r["cycle_id"]: r for r in load_rows(self.layout)}
+        self.assertEqual(sorted(rows), ["c1", "c3"])
+        self.assertEqual(rows["c1"]["skips"], {"debugging": 1})
+        self.assertEqual((rows["c1"]["post_calls"], rows["c1"]["reduction"]), (3, 0.7))
+        self.assertEqual(rows["c3"]["outcome"], "dropped")
+        self.assertNotIn("half-way", self.layout.metrics.read_text(encoding="utf-8"))
+        self.assertTrue(self.layout.report_stamp.exists())
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "🔋 pitstop report · 2 new cycles · 2 in metrics.jsonl")
+        self.assertIn("v 0.2.0 · cycles 1 · resumed 100% · median reduction 70% · gaps 100 per 100 resumes"
+                      " · chat text 100%", lines)
+        self.assertIn("  skips: debugging 1", lines)
+        self.assertIn("  kind: code 1", lines)
+        self.assertIn("v 0.2.1 · cycles 1 · resumed 0% · median reduction — · gaps — · chat text —", lines)
+        code, out = self.cli("report")
+        self.assertEqual(out.splitlines()[0], "🔋 pitstop report · 0 new cycles · 2 in metrics.jsonl")
+        self.assertEqual(len(load_rows(self.layout)), 2)
+
+    def test_report_quiet_prints_nothing(self):
+        self.assertEqual(self.cli("report", "--quiet"), (0, ""))
+        self.assertEqual(len(load_rows(self.layout)), 2)
+
+    def test_report_imports_the_audit_first(self):
+        audit = self.tmp / "audit-data.json"
+        audit.write_text(json.dumps({"cycles": [
+            {"done": {"ts": 1.0, "context_tokens": 100000, "checkpoint": "/nowhere.md", "_line": 3},
+             "base": {"resume_base": 40000}, "status": "resumed", "post_calls": 4}]}), encoding="utf-8")
+        code, out = self.cli("report", "--import-audit", str(audit))
+        self.assertEqual(code, 0)
+        self.assertEqual([r["cycle_id"] for r in load_rows(self.layout)], ["audit-3", "c1", "c3"])
+        self.assertIn("v pre-0.2 · cycles 1 · resumed 100% · median reduction 60% · gaps — · chat text —", out.splitlines())

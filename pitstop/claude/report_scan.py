@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional
 
-SKIP_CATEGORIES = ("debugging", "fine-editing", "ending-soon", "background-tasks", "brainstorming", "other")
+from pitstop.core.metrics import SKIP_CATEGORIES
+
 SKIP_MARK = "🔋 **pitstop** · skipped:"
 _SKIP_LINE = re.compile(r"🔋 \*\*pitstop\*\* · skipped: ([a-z-]+) —")
 _SKIP_MARK_BYTES = b"skipped:"  # ASCII: transcripts may escape the emoji (\\ud83d...)
