@@ -47,3 +47,26 @@ class PluginFilesTest(unittest.TestCase):
     def test_paths_used_by_hooks_exist(self):
         self.assertTrue(CLI_PATH.is_file())
         self.assertTrue(SKILL_PATH.is_file())
+
+    def test_skill_registers_in_one_call_with_a_quoted_heredoc(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn("mark-pending --stdin --kind", text)
+        self.assertIn("<<'PITSTOP_EOF'", text)
+
+    def test_skill_template_has_chat_only_text_section(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        template = text.split("```markdown", 1)[1].split("```", 1)[0]
+        self.assertIn("## Next action\n<one precise action>\n## Chat-only text\n", template)
+
+    def test_skill_lists_the_fixed_skip_categories(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn("🔋 **pitstop** · skipped: <category> — <reason>", text)
+        for category in ("debugging", "fine-editing", "ending-soon", "background-tasks", "brainstorming", "other"):
+            with self.subTest(category=category):
+                self.assertIn("`%s`" % category, text)
+
+    def test_skill_documents_metrics_and_report_commands(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        for needle in ("`/pitstop metrics on`", "`pitstop metrics on`", "`/pitstop report`", "`pitstop report`"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
