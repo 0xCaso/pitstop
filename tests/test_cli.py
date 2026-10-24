@@ -74,6 +74,17 @@ class MarkPendingTest(CliTestCase):
                          (212010, "Piano pitstop", "/work/repo", None))
         self.assertEqual([e["action"] for e in read_events(self.layout)], ["pitstop_done"])
 
+    def test_manual_pitstop_gets_its_own_cycle_id(self):
+        code, _ = self.cli("mark-pending", "--stdin", "--cwd", "/work/repo", stdin_text="# Checkpoint",
+                           env={"CLAUDE_CODE_SESSION_ID": "s1", "CLAUDE_CODE_ENTRYPOINT": "cli"})
+        self.assertEqual(code, 0)
+        done = read_events(self.layout)[0]
+        self.assertRegex(done["cycle_id"], r"^[0-9a-f]{12}$")
+        self.assertEqual((done["host"], done["restart"]), ("cli", "clear"))
+        self.assertEqual(self.consume().cycle_id, done["cycle_id"])
+        self.cli("gap", "missing the table")
+        self.assertNotIn("cycle_id", read_events(self.layout)[-1])
+
     def test_restart_mode_follows_the_entrypoint(self):
         checkpoint = self.tmp / "cp.md"
         checkpoint.write_text("# Checkpoint", encoding="utf-8")

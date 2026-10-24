@@ -33,6 +33,7 @@ class PendingRecord:
     plan: Optional[str] = None
     project_dir: Optional[str] = None
     restart: Optional[str] = None  # "clear", "auto" or "compact"; None in records written before it existed
+    cycle_id: Optional[str] = None  # None in records written before 0.2.0
 
     @property
     def in_place(self) -> bool:
@@ -94,6 +95,7 @@ def _read_record(path: Path) -> Optional[PendingRecord]:
         and (record.plan is None or isinstance(record.plan, str))
         and (record.project_dir is None or isinstance(record.project_dir, str))
         and (record.restart is None or isinstance(record.restart, str))
+        and (record.cycle_id is None or isinstance(record.cycle_id, str))
     )
     return record if valid else None
 
@@ -237,18 +239,18 @@ def has_session_pending(layout: Layout, session_id: str, now: float, window_minu
     return False
 
 
-def drop_in_place_pending(layout: Layout, session_id: str) -> int:
-    """Delete this session's records for an in-place restart and return how many. Called when the session
+def drop_in_place_pending(layout: Layout, session_id: str) -> List[PendingRecord]:
+    """Delete this session's records for an in-place restart and return them. Called when the session
     goes on without restarting: a later /compact or a fresh session must not bring that checkpoint back."""
     try:
         paths = _list_records(layout)
     except FileNotFoundError:
-        return 0
-    dropped = 0
+        return []
+    dropped = []
     for path in paths:
         record = _read_record(path)
         if record is not None and record.session_id == session_id and record.in_place and _claim(path):
-            dropped += 1
+            dropped.append(record)
     return dropped
 
 
