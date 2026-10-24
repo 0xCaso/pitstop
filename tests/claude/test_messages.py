@@ -7,6 +7,7 @@ from pitstop.claude.messages import (
     banner_triggered,
     batch_request_context,
     done_line,
+    previous_transcript,
     resume_context,
     resumed_line,
     stop_request_context,
@@ -61,3 +62,18 @@ class MessagesTest(unittest.TestCase):
         self.assertIn(RECORD.checkpoint, text)
         self.assertIn("🔋 **pitstop** · resumed from 212K · Where we were:", text)
         self.assertIn('/usr/bin/python3 /repo/bin/pitstop gap "', text)
+
+
+class PreviousTranscriptTest(unittest.TestCase):
+    def test_resume_context_points_to_the_previous_transcript(self):
+        record = dataclasses.replace(RECORD, project_dir="/p")
+        self.assertEqual(previous_transcript(record), "/p/s1.jsonl")
+        context = resume_context(record, "# cp", cli="/x/bin/pitstop")
+        self.assertIn("Transcript before the restart: /p/s1.jsonl", context)
+        step4 = context.split("\n4. ", 1)[1].split("\n", 1)[0]
+        self.assertIn("/p/s1.jsonl", step4)
+        self.assertIn("gap", step4)
+
+    def test_without_project_dir_there_is_no_transcript_line(self):
+        self.assertIsNone(previous_transcript(RECORD))
+        self.assertNotIn("Transcript before the restart", resume_context(RECORD, "# cp", cli="/x/bin/pitstop"))
