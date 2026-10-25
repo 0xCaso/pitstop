@@ -98,7 +98,7 @@ def _checkpoint_measures(path: Any) -> Dict[str, int]:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {}
-    stats = analyze_checkpoint(text, os.path.dirname(path))
+    stats = analyze_checkpoint(text, os.path.dirname(path), os.path.dirname(path))
     return {"checkpoint_bytes": stats.bytes, "sections_filled": stats.sections_filled,
             "chat_text_filled": int(stats.chat_text_filled), "support_files": stats.support_files}
 
