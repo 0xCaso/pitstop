@@ -23,4 +23,6 @@ class Layout:
         self.checkpoints_dir = base / "checkpoints"
         self.log = base / "log.jsonl"
         self.gaps = base / "gaps.jsonl"
+        self.metrics = base / "metrics.jsonl"
+        self.report_stamp = base / "report-last-run.txt"
         self.config_notice = base / "config-notice.txt"

@@ -1,16 +1,19 @@
 """Hook handlers: glue between Claude Code events and the pitstop core. Every error fails open."""
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from pitstop.claude import messages
 from pitstop.claude.hookio import HookInput, HookInputError, build_output, parse_hook_input
 from pitstop.claude.notify import notify
 from pitstop.claude.transcript import TranscriptSchemaError, read_context_tokens
+from pitstop.core.build import new_cycle_id
 from pitstop.core.config import Config, load_config, should_show_config_notice
 from pitstop.core.decide import REQUEST, Event, decide, segment_start
-from pitstop.core.fsutil import LockTimeout
+from pitstop.core.fsutil import LockTimeout, atomic_write_text, file_lock
 from pitstop.core.log import log_event
 from pitstop.core.paths import Layout
 from pitstop.core.state import SessionState, locked_state
@@ -28,12 +31,18 @@ CLI_PATH = REPO_ROOT / "bin" / "pitstop"
 SKILL_PATH = REPO_ROOT / "skills" / "pitstop" / "SKILL.md"
 
 Notifier = Callable[[str, str], None]
+REPORT_EVERY_SECONDS = 24 * 60 * 60
 
 # log name -> (hookEventName in the output, builder of the instructions for the model)
 _REQUESTS = {
     "stop": ("Stop", messages.stop_request_context),
     "post_tool_batch": ("PostToolBatch", messages.batch_request_context),
 }
+
+
+def host() -> str:
+    """Terminal, `claude -p` or an SDK host, as Claude Code names its entry point."""
+    return os.environ.get("CLAUDE_CODE_ENTRYPOINT", "unknown")
 
 
 class UnknownHookEvent(Exception):
@@ -93,11 +102,19 @@ def _context_tokens(layout: Layout, state: SessionState, log_name: str, transcri
     return tokens
 
 
+def _open_request(state: SessionState, tokens: int) -> str:
+    """Record the request in the session state; the first request of a segment starts a new cycle."""
+    if state.requested_at_tokens is None or state.cycle_id is None:
+        state.cycle_id = new_cycle_id()
+    state.requested_at_tokens = tokens
+    return state.cycle_id
+
+
 def _request(inp: HookInput, layout: Layout, notifier: Notifier, config: Config, tokens: int, log_name: str,
-             background_tasks: Optional[int]) -> str:
+             background_tasks: Optional[int], cycle_id: str) -> str:
     output_event, build_context = _REQUESTS[log_name]
     log_event(layout, log_name, "request", session_id=inp.session_id, context_tokens=tokens,
-              threshold=config.threshold_tokens)
+              threshold=config.threshold_tokens, cycle_id=cycle_id, host=host())
     if config.notify:
         _safe_notify(notifier, messages.notify_triggered(tokens))
     context = build_context(tokens=tokens, threshold=config.threshold_tokens, step=config.retrigger_step_tokens,
@@ -111,7 +128,8 @@ def _maybe_log_resume_base(layout: Layout, state: SessionState, log_name: str, s
     PostToolBatch) sees a valid reading first."""
     if state.awaiting_resume_base and tokens is not None:
         state.awaiting_resume_base = False
-        log_event(layout, log_name, "resume_base", session_id=session_id, resume_base=tokens)
+        log_event(layout, log_name, "resume_base", session_id=session_id, resume_base=tokens,
+                  cycle_id=state.cycle_id)
 
 
 def _handle_stop(inp: HookInput, layout: Layout, notifier: Notifier, now: float) -> Optional[str]:
@@ -131,8 +149,8 @@ def _handle_stop(inp: HookInput, layout: Layout, notifier: Notifier, now: float)
         event = Event("stop", tokens, stop_hook_active=inp.stop_hook_active)
         if decide(config, state, event).action != REQUEST:
             return None
-        state.requested_at_tokens = tokens
-    return _request(inp, layout, notifier, config, tokens, "stop", inp.background_tasks)
+        cycle_id = _open_request(state, tokens)
+    return _request(inp, layout, notifier, config, tokens, "stop", inp.background_tasks, cycle_id)
 
 
 def _handle_post_tool_batch(inp: HookInput, layout: Layout, notifier: Notifier, now: float) -> Optional[str]:
@@ -154,8 +172,8 @@ def _handle_post_tool_batch(inp: HookInput, layout: Layout, notifier: Notifier, 
         segment_start(config, state, tokens)
         if decide(config, state, Event("post_tool_batch", tokens)).action != REQUEST:
             return None
-        state.requested_at_tokens = tokens
-    return _request(inp, layout, notifier, config, tokens, "post_tool_batch", None)
+        cycle_id = _open_request(state, tokens)
+    return _request(inp, layout, notifier, config, tokens, "post_tool_batch", None, cycle_id)
 
 
 def _is_fresh_session(transcript_path: str) -> bool:
@@ -184,7 +202,7 @@ def _handle_user_prompt_submit(inp: HookInput, layout: Layout, notifier: Notifie
         if expired is None:
             return None
         log_event(layout, "user_prompt_submit", "resume_expired", session_id=inp.session_id,
-                  checkpoint=expired.checkpoint)
+                  checkpoint=expired.checkpoint, cycle_id=expired.cycle_id)
         return build_output(
             "UserPromptSubmit",
             system_message=messages.banner_checkpoint_expired(),
@@ -200,16 +218,52 @@ def _drop_unused_in_place_record(inp: HookInput, layout: Layout) -> None:
     prompt = (inp.prompt or "").strip()
     if not prompt or prompt.startswith("/") or prompt == messages.COMPACT_SUMMARY:
         return
-    if drop_in_place_pending(layout, inp.session_id):
-        log_event(layout, "user_prompt_submit", "pending_dropped", session_id=inp.session_id)
+    for record in drop_in_place_pending(layout, inp.session_id):
+        log_event(layout, "user_prompt_submit", "pending_dropped", session_id=inp.session_id,
+                  cycle_id=record.cycle_id)
+
+
+def _spawn_report(argv: List[str]) -> None:
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def _stamp(layout: Layout) -> Optional[float]:
+    try:
+        return float(layout.report_stamp.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def maybe_start_daily_report(layout: Layout, config: Config, now: float,
+                             spawn: Callable[[List[str]], None]) -> bool:
+    """Start `pitstop report --quiet` in the background if metrics is on and the last run is missing or older
+    than a day. The stamp is re-read and rewritten under its lock, so two sessions starting together spawn
+    it once. Never raises: False when nothing was started."""
+    if not config.metrics:
+        return False
+    try:
+        with file_lock(layout.base / "report-last-run.lock", timeout=0.2):
+            last = _stamp(layout)
+            if last is not None and now - last < REPORT_EVERY_SECONDS:
+                return False
+            atomic_write_text(layout.report_stamp, "%d\n" % int(now))
+            spawn([sys.executable, str(CLI_PATH), "report", "--quiet"])
+        return True
+    except Exception:  # fail-open: the session starts whatever happens to the report
+        return False
 
 
 def _handle_session_start(inp: HookInput, layout: Layout, notifier: Notifier, now: float) -> Optional[str]:
-    """After /compact (the restart available where /clear is not, e.g. T3 Code): the same session
+    """Any source: the daily report, at most once a day (see maybe_start_daily_report).
+    After /compact (the restart available where /clear is not, e.g. T3 Code): the same session
     picks up its own checkpoint. Expired records are left alone: a fresh session announces them."""
-    if inp.source != "compact" or inp.agent_id or not has_pending(layout):
+    if inp.agent_id:
         return None
     config, _ = load_config(layout)
+    maybe_start_daily_report(layout, config, now, _spawn_report)
+    if inp.source != "compact" or not has_pending(layout):
+        return None
     record = consume_pending(layout, inp.session_id, inp.cwd, now, config.resume_window_minutes,
                              same_session_only=True)
     if record is None:
@@ -241,6 +295,7 @@ def _resume(inp: HookInput, layout: Layout, notifier: Notifier, config: Config, 
             state.last_transcript_size = -1
             state.last_context_tokens = None
             state.last_error = None
+            state.cycle_id = record.cycle_id  # resume_base and gaps of this segment belong to that cycle
     except (LockTimeout, OSError) as exc:
         # The checkpoint is still readable even if the fresh session's state could not be reset:
         # resume_base tracking for the new segment is lost, but the resume itself must not be.
@@ -252,7 +307,7 @@ def _resume(inp: HookInput, layout: Layout, notifier: Notifier, config: Config, 
                   checkpoint=record.checkpoint)
         return build_output(output_event, system_message=messages.banner_checkpoint_missing())
     log_event(layout, log_name, "resume", session_id=inp.session_id, checkpoint=record.checkpoint,
-              resumed_from=record.context_tokens)
+              resumed_from=record.context_tokens, cycle_id=record.cycle_id)
     if config.notify:
         _safe_notify(notifier, messages.notify_resumed(record.context_tokens))
     return build_output(

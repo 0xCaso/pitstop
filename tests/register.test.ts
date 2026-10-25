@@ -6,7 +6,7 @@ const PENDING = `${HOME}/.claude/pitstop/pending`
 const NOW = 1_800_000_000_000
 const SUMMARY = 'Resume from the pitstop checkpoint.'
 
-type World = { files: Record<string, string>; env?: Record<string, string>; calls: string[] }
+type World = { files: Record<string, string>; env?: Record<string, string>; calls: string[]; failCompact?: boolean }
 
 function world(on: On, w: World) {
   mock.env(on, { HOME, ...w.env })
@@ -24,6 +24,7 @@ function world(on: On, w: World) {
     return { value: text }
   })
   on('command.run', (_$, e) => {
+    if (w.failCompact) throw new Error('compact failed')
     w.calls.push(`/${e.command} ${e.args}`)
     return { text: '' }
   })
@@ -31,7 +32,10 @@ function world(on: On, w: World) {
     w.calls.push(e.text)
     return { text: e.text }
   })
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    w.calls.push(`toast: ${e.text}`)
+    return { value: undefined }
+  })
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   return clock
 }
@@ -98,4 +102,12 @@ test('does nothing after an interrupted turn or a subagent turn', async ($, on) 
   await $.turn.complete({ ...turn, agentId: 'a1' })
   await clock.advance(1)
   expect(w.calls).toEqual([])
+})
+
+test('a failed restart tells the user to run /compact', async ($, on) => {
+  const w: World = { files: { [`${PENDING}/1-a.json`]: record('s1') }, calls: [], failCompact: true }
+  const clock = world(on, w)
+  await $.turn.complete(turn)
+  await clock.advance(1)
+  expect(w.calls).toContain('toast: pitstop: automatic restart failed, run /compact and send any message')
 })

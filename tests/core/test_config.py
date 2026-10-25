@@ -14,6 +14,12 @@ class ParseConfigTest(unittest.TestCase):
         config = parse_config({"threshold_tokens": 60000})
         self.assertEqual((config.threshold_tokens, config.enabled), (60000, True))
 
+    def test_metrics_defaults_off_and_must_be_bool(self):
+        self.assertFalse(parse_config({}).metrics)
+        self.assertTrue(parse_config({"metrics": True}).metrics)
+        with self.assertRaises(ConfigError):
+            parse_config({"metrics": "on"})
+
     def test_unknown_keys_are_ignored(self):
         self.assertEqual(parse_config({"future": 1}), Config())
 

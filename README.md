@@ -37,7 +37,8 @@ files re-read after each resume. The saving in your sessions depends on how they
 
 Claude skips a pitstop when the checkpoint would lose something that lives only in the context: a debugging session
 half-way, fine edits on a long text, subagents still running, work that ends in a few exchanges. When in doubt,
-it skips.
+it skips, and it prints the reason as one of six fixed categories (`debugging`, `fine-editing`, `ending-soon`,
+`background-tasks`, `brainstorming`, `other`).
 
 ## Limits
 
@@ -73,11 +74,13 @@ Start a new session afterwards. pitstop does not edit your `settings.json`.
 
 | Command | Effect |
 |---|---|
-| `/pitstop status` | On or off, notifications, current context, threshold, pitstops so far, real resume size, gaps |
+| `/pitstop status` | On or off, notifications, metrics, current context, threshold, pitstops so far, real resume size, gaps |
 | `/pitstop on` · `/pitstop off` | Turn pitstop on or off in every session |
 | `/pitstop off here` | Turn it off in the current session only |
 | `/pitstop now` | Checkpoint and restart right away |
 | `/pitstop notify on` · `off` | macOS notifications |
+| `/pitstop metrics on` · `off` | The daily local report and `metrics.jsonl` (off by default) |
+| `/pitstop report` | Rebuild your pitstops from the log and print a summary by version |
 | `/pitstop gap <what was missing>` | Record something a checkpoint missed |
 
 The `/` menu lists the skill as `/pitstop:pitstop`.
@@ -95,7 +98,8 @@ a clone).
   "notify": true,
   "threshold_tokens": 200000,
   "retrigger_step_tokens": 50000,
-  "resume_window_minutes": 60
+  "resume_window_minutes": 60,
+  "metrics": false
 }
 ```
 
@@ -104,6 +108,7 @@ a clone).
 | `threshold_tokens` | Context size that triggers a pitstop (50,000–900,000) |
 | `retrigger_step_tokens` | After a skipped pitstop, how many more tokens before asking again |
 | `resume_window_minutes` | How long a checkpoint stays valid for an automatic resume (1–60) |
+| `metrics` | Run `pitstop report` in the background once a day, at session start |
 
 An invalid file turns pitstop off and says why once, until the file changes.
 
@@ -112,7 +117,9 @@ An invalid file turns pitstop off and says why once, until the file changes.
 - `Stop` and `PostToolBatch` hooks read the context size from the session transcript. Past the threshold they ask
   Claude for a pitstop, once per segment. A context back under the threshold (a `/compact` outside pitstop) starts
   a new segment.
-- The `pitstop` skill writes the checkpoint, registers it with the `bin/pitstop` CLI and restarts the session.
+- The `pitstop` skill writes and registers the checkpoint in one call to the `bin/pitstop` CLI, then restarts the
+  session. The CLI refuses a checkpoint that cites, under Re-read, a file that does not exist, so Claude fixes it
+  before the restart.
 - After `/clear`, a `UserPromptSubmit` hook injects the checkpoint into the first message of the new session, once,
   if it is in the same project and within the resume window.
 - After `/compact`, a `SessionStart` hook injects the session's own checkpoint, once. It never takes another
@@ -127,11 +134,23 @@ An invalid file turns pitstop off and says why once, until the file changes.
   one-line notice with its path instead.
 - Every hook fails open: on any error the conversation goes on untouched.
 
+## Measuring your pitstops
+
+`/pitstop report` (a local Python script, no tokens) rebuilds each pitstop from the log: request, skip and its
+category, checkpoint, restart, resume, context before and after, model calls until the next pitstop, gaps. It
+prints a summary by plugin version and adds one row per finished pitstop to `~/.claude/pitstop/metrics.jsonl`,
+once per pitstop. The rows keep only numbers and categories, never conversation text, so they stay after
+checkpoints and transcripts are deleted. To find skips and calls, the report reads the local transcripts of every
+Claude profile on the machine (`$CLAUDE_CONFIG_DIR` and `~/.claude*/projects`).
+
+`metrics` is off by default. With `/pitstop metrics on`, the report also runs by itself in the background, at most
+once a day, when a session starts.
+
 ## Data
 
 Everything stays on your machine, in `~/.claude/pitstop/` (override with `PITSTOP_HOME`): `config.json`,
-`checkpoints/`, `pending/`, `state/`, `log.jsonl` and `gaps.jsonl`. The log holds token counts and states, not
-conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
+`checkpoints/`, `pending/`, `state/`, `log.jsonl`, `gaps.jsonl` and, once you run the report, `metrics.jsonl` and
+`report-last-run.txt`. The log and the metrics hold token counts, states and categories, not conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
 instruction. Checkpoints and session state files older than 30 days are deleted at the next pitstop.
 
 ## Development

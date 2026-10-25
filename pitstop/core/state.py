@@ -12,7 +12,7 @@ from pitstop.core.paths import Layout
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _FIELDS = ("excluded", "requested_at_tokens", "last_transcript_size", "last_context_tokens",
-           "awaiting_resume_base", "last_error")
+           "awaiting_resume_base", "last_error", "cycle_id")
 
 
 @dataclass
@@ -24,6 +24,7 @@ class SessionState:
     last_context_tokens: Optional[int] = None
     awaiting_resume_base: bool = False
     last_error: Optional[str] = None
+    cycle_id: Optional[str] = None  # the pitstop cycle this segment belongs to (see pitstop.core.build)
 
 
 def is_safe_session_id(session_id: str) -> bool:
@@ -53,6 +54,7 @@ def _valid(raw: Dict[str, Any]) -> bool:
         and (raw.get("last_context_tokens") is None or _is_int(raw.get("last_context_tokens")))
         and _is_int(raw.get("last_transcript_size", -1))
         and (raw.get("last_error") is None or isinstance(raw.get("last_error"), str))
+        and (raw.get("cycle_id") is None or isinstance(raw.get("cycle_id"), str))
     )
 
 

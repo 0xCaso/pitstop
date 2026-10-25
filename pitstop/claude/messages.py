@@ -1,4 +1,5 @@
 """Everything pitstop says. All of it is English."""
+import os
 import time
 from typing import Optional
 
@@ -106,18 +107,34 @@ def batch_request_context(tokens: int, threshold: int, step: int, cwd: str, cli:
     return _request_context(head, mode, tokens, threshold, step, cwd, cli, skill, background_tasks)
 
 
+def previous_transcript(record: PendingRecord) -> Optional[str]:
+    """The transcript of the session that wrote the checkpoint, where whatever it left out still is."""
+    if not record.project_dir:
+        return None
+    return os.path.join(record.project_dir, "%s.jsonl" % record.session_id)
+
+
 def resume_context(record: PendingRecord, checkpoint_text: str, cli: str) -> str:
+    transcript = previous_transcript(record)
+    gap = "`/usr/bin/python3 {cli} gap \"<what was missing>\"`".format(cli=cli)
+    if transcript is None:
+        missing = "4. If something you need is missing from the checkpoint, run %s, then recover it.\n" % gap
+    else:
+        missing = ("4. If something you need is missing from the checkpoint, look for it in the transcript before "
+                   "the restart, %s (Grep it, then Read around the match with an offset), recover it, then run "
+                   "%s.\n" % (transcript, gap))
     base = (
-        "[pitstop] This session restarts from a pitstop checkpoint taken at {k}. Checkpoint file: {path}\n\n"
+        "[pitstop] This session restarts from a pitstop checkpoint taken at {k}. Checkpoint file: {path}\n"
+        "{transcript_line}\n"
         "<pitstop-checkpoint>\n{text}\n</pitstop-checkpoint>\n\n"
         "Resume:\n"
         "1. Re-read only the files the checkpoint cites that the next action needs. Do not re-explore.\n"
         "2. Print exactly `{line}` followed by three short lines in the language of the conversation: goal, current state, next action.\n"
         "3. Continue from the next action.\n"
-        "4. If something you need is missing from the checkpoint, run "
-        "`/usr/bin/python3 {cli} gap \"<what was missing>\"`, then recover it.\n"
     ).format(k=k(record.context_tokens), path=record.checkpoint, text=checkpoint_text.strip(),
-             line=resumed_line(record.context_tokens), cli=cli)
+             line=resumed_line(record.context_tokens),
+             transcript_line="Transcript before the restart: %s\n" % transcript if transcript else "")
+    base += missing
     if record.plan:
         base += "5. A superpowers plan is being executed: resume the plan `%s` from its ledger with superpowers:subagent-driven-development.\n" % record.plan
     return base

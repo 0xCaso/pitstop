@@ -1,5 +1,6 @@
 import stat
 
+from pitstop.core import build
 from pitstop.core.log import log_event, read_events
 from tests.helpers import TempLayoutTestCase
 
@@ -33,3 +34,8 @@ class LogTest(TempLayoutTestCase):
     def test_log_file_is_private(self):
         log_event(self.layout, "stop", "request")
         self.assertEqual(stat.S_IMODE(self.layout.log.stat().st_mode), 0o600)
+
+    def test_every_event_carries_version_and_skill_hash(self):
+        log_event(self.layout, "cli", "gap", session_id="s1")
+        event = read_events(self.layout)[0]
+        self.assertEqual((event["v"], event["skill"]), (build.plugin_version(), build.skill_hash()))

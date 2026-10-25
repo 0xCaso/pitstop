@@ -3,17 +3,21 @@ import json
 import time
 from typing import Any, Dict, List
 
+from pitstop.core import build
 from pitstop.core.fsutil import append_line
 from pitstop.core.paths import Layout
 
 ALLOWED_FIELDS = frozenset(
-    {"session_id", "context_tokens", "threshold", "reason", "error", "checkpoint", "resume_base", "resumed_from"}
+    {"session_id", "context_tokens", "threshold", "reason", "error", "checkpoint", "resume_base", "resumed_from",
+     "cycle_id", "host", "kind", "restart", "checkpoint_bytes", "sections_filled", "chat_text_filled",
+     "support_files", "unchecked_entries"}
 )
 _SCALARS = (str, int, float, bool)
 
 
 def log_event(layout: Layout, event: str, action: str, **fields: Any) -> None:
-    record: Dict[str, Any] = {"ts": round(time.time(), 3), "event": event, "action": action}
+    record: Dict[str, Any] = {"ts": round(time.time(), 3), "event": event, "action": action,
+                              "v": build.plugin_version(), "skill": build.skill_hash()}
     for key, value in fields.items():
         if key not in ALLOWED_FIELDS:
             raise ValueError("field not allowed in log: %s" % key)
