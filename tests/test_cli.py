@@ -4,7 +4,9 @@ from pathlib import Path
 
 from pitstop.cli import main
 from pitstop.core.config import load_config
+from pitstop.core.fsutil import append_line
 from pitstop.core.log import log_event, read_events
+from pitstop.core.metrics import load_rows
 from pitstop.core.state import load_state
 from pitstop.core.store import consume_pending
 from tests.helpers import NOW, TempLayoutTestCase, assistant_line, user_line, write_jsonl
@@ -41,6 +43,14 @@ class ToggleCommandsTest(CliTestCase):
         self.assertEqual(self.cli("notify", "off"), (0, "🔋 pitstop notifications off\n"))
         self.assertFalse(load_config(self.layout)[0].notify)
 
+    def test_metrics_toggle_and_status_line(self):
+        self.assertIn("metrics: off\n", self.cli("status")[1])
+        self.assertEqual(self.cli("metrics", "on"), (0, "🔋 pitstop metrics on\n"))
+        self.assertTrue(load_config(self.layout)[0].metrics)
+        self.assertIn("metrics: on\n", self.cli("status")[1])
+        self.assertEqual(self.cli("metrics", "off"), (0, "🔋 pitstop metrics off\n"))
+        self.assertFalse(load_config(self.layout)[0].metrics)
+
     def test_off_here_excludes_current_session_only(self):
         self.assertEqual(self.cli("off-here"), (0, "🔋 pitstop off in this session\n"))
         self.assertTrue(load_state(self.layout, "s1").excluded)
@@ -73,6 +83,50 @@ class MarkPendingTest(CliTestCase):
         self.assertEqual((record.context_tokens, record.title, record.cwd, record.plan),
                          (212010, "Piano pitstop", "/work/repo", None))
         self.assertEqual([e["action"] for e in read_events(self.layout)], ["pitstop_done"])
+
+    def test_manual_pitstop_gets_its_own_cycle_id(self):
+        code, _ = self.cli("mark-pending", "--stdin", "--cwd", "/work/repo", stdin_text="# Checkpoint",
+                           env={"CLAUDE_CODE_SESSION_ID": "s1", "CLAUDE_CODE_ENTRYPOINT": "cli"})
+        self.assertEqual(code, 0)
+        done = read_events(self.layout)[0]
+        self.assertRegex(done["cycle_id"], r"^[0-9a-f]{12}$")
+        self.assertEqual((done["host"], done["restart"]), ("cli", "clear"))
+        self.assertEqual(self.consume().cycle_id, done["cycle_id"])
+        self.cli("gap", "missing the table")
+        self.assertNotIn("cycle_id", read_events(self.layout)[-1])
+
+    def reread_checkpoint(self, *entries):
+        return "# cp\n\n## Next action\nGo.\n## Chat-only text\n—\n## Re-read\n%s\n" % "\n".join(entries)
+
+    def test_missing_reread_file_blocks_and_writes_nothing(self):
+        (self.tmp / "docs").mkdir()
+        code, out = self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp),
+                             stdin_text=self.reread_checkpoint("- `docs/plan.md:4` — the plan", "- `docs/b.md` — b"))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "🔋 pitstop · files under Re-read not found: docs/plan.md:4, docs/b.md\n")
+        self.assertFalse(self.layout.checkpoints_dir.exists() and any(self.layout.checkpoints_dir.iterdir()))
+        self.assertIsNone(self.consume())
+        self.assertEqual(read_events(self.layout), [])
+
+    def test_unchecked_entries_warn_and_register(self):
+        code, out = self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp),
+                             stdin_text=self.reread_checkpoint("- `S/a.md` — alias", "- the PR text"))
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("warning: not checked under Re-read: 2 entries\n"))
+        self.assertIsNotNone(consume_pending(self.layout, "s1", str(self.tmp), NOW, 10))
+
+    def test_done_event_carries_checkpoint_stats_and_kind(self):
+        (self.tmp / "notes.md").write_text("n", encoding="utf-8")
+        text = "# cp\n\n## Next action\nGo.\n## Chat-only text\nSee `notes.md`.\n## Re-read\n- `S/x` — alias\n"
+        code, _ = self.cli("mark-pending", "--stdin", "--kind", "other", "--cwd", str(self.tmp), stdin_text=text)
+        self.assertEqual(code, 0)
+        done = read_events(self.layout)[0]
+        self.assertEqual({k: done[k] for k in ("checkpoint_bytes", "sections_filled", "chat_text_filled",
+                                               "support_files", "unchecked_entries", "kind")},
+                         {"checkpoint_bytes": len(text.encode("utf-8")), "sections_filled": 3,
+                          "chat_text_filled": True, "support_files": 1, "unchecked_entries": 1, "kind": "other"})
+        self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp), stdin_text="# cp\n")
+        self.assertEqual(read_events(self.layout)[-1]["kind"], "unknown")
 
     def test_restart_mode_follows_the_entrypoint(self):
         checkpoint = self.tmp / "cp.md"
@@ -156,6 +210,7 @@ class StatusAndGapTest(CliTestCase):
         self.assertEqual(out.splitlines(), [
             "🔋 pitstop: on",
             "notifications: on",
+            "metrics: off",
             "current context: 212K · threshold 200K",
             "pitstops: 1 · real resumes: 2 · gaps: 1",
             "real resume size: last 90K · median 80K",
@@ -168,3 +223,86 @@ class StatusAndGapTest(CliTestCase):
         self.cli("off-here")
         self.assertIn("🔋 pitstop: off in this session", self.cli("status")[1])
         self.assertIn("current context: not available", self.cli("status", env={})[1])
+
+
+def _iso(ts):
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+
+def _event(action, ts, cycle, session, v="0.2.0", **fields):
+    entry = {"ts": ts, "event": "x", "action": action, "v": v, "skill": "abcd1234", "session_id": session,
+             "cycle_id": cycle}
+    entry.update(fields)
+    return json.dumps(entry)
+
+
+def _said(text, ts, message_id, session):
+    return assistant_line(message_id=message_id, sessionId=session, timestamp=_iso(ts),
+                          message={"id": message_id, "model": "claude-opus-5", "role": "assistant",
+                                   "content": [{"type": "text", "text": text}],
+                                   "usage": {"input_tokens": 1, "output_tokens": 1}})
+
+
+class ReportTest(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        lines = [
+            _event("request", NOW - 3000, "c1", "s1", context_tokens=210000, host="cli"),
+            _event("pitstop_done", NOW - 2900, "c1", "s1", context_tokens=200000, restart="clear", kind="code",
+                   checkpoint_bytes=3000, sections_filled=8, chat_text_filled=True, support_files=0),
+            _event("resume", NOW - 2800, "c1", "s2"),
+            _event("resume_base", NOW - 2790, "c1", "s2", resume_base=60000),
+            _event("gap", NOW - 2700, "c1", "s2"),
+            _event("pitstop_done", NOW - 2000, "c3", "s3", v="0.2.1", context_tokens=150000, restart="compact"),
+            _event("pending_dropped", NOW - 1990, "c3", "s3", v="0.2.1"),
+            _event("request", NOW - 10, "c2", "s2", context_tokens=205000),
+        ]
+        for line in lines:
+            append_line(self.layout.log, line)
+        write_jsonl(self.projects / "-work-repo" / "s1.jsonl", [
+            _said("🔋 **pitstop** · skipped: debugging — half-way through a failing test", NOW - 2990, "m1", "s1"),
+            _said("🔋 **pitstop** · skipped: other — after the pitstop", NOW - 2850, "m2", "s1"),
+        ])
+        write_jsonl(self.projects / "-work-repo" / "s2.jsonl", [
+            _said("before the resume", NOW - 2850, "n0", "s2"),
+            _said("one", NOW - 2795, "n1", "s2"),
+            _said("two", NOW - 2700, "n2", "s2"),
+            _said("three", NOW - 2600, "n3", "s2"),
+            _said("after the next request", NOW - 5, "n4", "s2"),
+        ])
+
+    def test_report_writes_closed_cycles_once_and_prints_summary_by_version(self):
+        code, out = self.cli("report")
+        self.assertEqual(code, 0)
+        rows = {r["cycle_id"]: r for r in load_rows(self.layout)}
+        self.assertEqual(sorted(rows), ["c1", "c3"])
+        self.assertEqual(rows["c1"]["skips"], {"debugging": 1})
+        self.assertEqual((rows["c1"]["post_calls"], rows["c1"]["reduction"]), (3, 0.7))
+        self.assertEqual(rows["c3"]["outcome"], "dropped")
+        self.assertNotIn("half-way", self.layout.metrics.read_text(encoding="utf-8"))
+        self.assertTrue(self.layout.report_stamp.exists())
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "🔋 pitstop report · 2 new cycles · 2 in metrics.jsonl")
+        self.assertIn("v 0.2.0 · cycles 1 · resumed 100% · median reduction 70% · gaps 100 per 100 resumes"
+                      " · chat text 100%", lines)
+        self.assertIn("  skips: debugging 1", lines)
+        self.assertIn("  kind: code 1", lines)
+        self.assertIn("v 0.2.1 · cycles 1 · resumed 0% · median reduction — · gaps — · chat text —", lines)
+        code, out = self.cli("report")
+        self.assertEqual(out.splitlines()[0], "🔋 pitstop report · 0 new cycles · 2 in metrics.jsonl")
+        self.assertEqual(len(load_rows(self.layout)), 2)
+
+    def test_report_quiet_prints_nothing(self):
+        self.assertEqual(self.cli("report", "--quiet"), (0, ""))
+        self.assertEqual(len(load_rows(self.layout)), 2)
+
+    def test_report_imports_the_audit_first(self):
+        audit = self.tmp / "audit-data.json"
+        audit.write_text(json.dumps({"cycles": [
+            {"done": {"ts": 1.0, "context_tokens": 100000, "checkpoint": "/nowhere.md", "_line": 3},
+             "base": {"resume_base": 40000}, "status": "resumed", "post_calls": 4}]}), encoding="utf-8")
+        code, out = self.cli("report", "--import-audit", str(audit))
+        self.assertEqual(code, 0)
+        self.assertEqual([r["cycle_id"] for r in load_rows(self.layout)], ["audit-3", "c1", "c3"])
+        self.assertIn("v pre-0.2 · cycles 1 · resumed 100% · median reduction 60% · gaps — · chat text —", out.splitlines())

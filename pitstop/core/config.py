@@ -14,13 +14,14 @@ class Config:
     threshold_tokens: int = 200000
     retrigger_step_tokens: int = 50000
     resume_window_minutes: int = 60
+    metrics: bool = False  # the daily background report and metrics.jsonl
 
 
 class ConfigError(Exception):
     """config.json cannot be used. The message is shown to the user."""
 
 
-_BOOL_KEYS = ("enabled", "notify")
+_BOOL_KEYS = ("enabled", "notify", "metrics")
 _INT_RANGES = {
     "threshold_tokens": (50000, 900000),
     "retrigger_step_tokens": (10000, None),

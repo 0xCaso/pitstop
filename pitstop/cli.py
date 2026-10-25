@@ -5,12 +5,13 @@ import os
 import statistics
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Mapping, Optional, TextIO
+from typing import Any, Dict, List, Mapping, Optional, TextIO
 
 from pitstop.claude import messages
 from pitstop.claude.hooks import run_hook
+from pitstop.claude.report_scan import calls_after, projects_dirs, skip_categories
 from pitstop.claude.transcript import (
     TranscriptSchemaError,
     default_projects_dir,
@@ -19,9 +20,13 @@ from pitstop.claude.transcript import (
     read_last_cwd,
     read_session_title,
 )
+from pitstop.core.build import new_cycle_id
+from pitstop.core.checkpoint import analyze_checkpoint
 from pitstop.core.config import ConfigError, load_config, update_config
-from pitstop.core.fsutil import append_line
+from pitstop.core.cycles import Cycle, build_cycles, next_start
+from pitstop.core.fsutil import append_line, atomic_write_text
 from pitstop.core.log import log_event, read_events
+from pitstop.core.metrics import append_rows, cycle_row, import_audit, load_rows, summary
 from pitstop.core.paths import Layout, pitstop_home
 from pitstop.core.state import load_state, locked_state
 from pitstop.core.store import PendingRecord, mark_pending, new_checkpoint_path, prune_old_files, write_checkpoint
@@ -60,6 +65,8 @@ class Ctx:
     env: Mapping[str, str]
     projects_dir: Path
     now: float
+    # Where `report` looks for transcripts: every Claude profile's projects folder.
+    report_dirs: List[Path] = field(default_factory=list)
 
     def say(self, text: str) -> None:
         write_text(self.stdout, text + "\n")
@@ -102,6 +109,11 @@ def cmd_notify(args: argparse.Namespace, ctx: Ctx) -> None:
     ctx.say("🔋 pitstop notifications %s" % args.state)
 
 
+def cmd_metrics(args: argparse.Namespace, ctx: Ctx) -> None:
+    update_config(ctx.layout, metrics=args.state == "on")
+    ctx.say("🔋 pitstop metrics %s" % args.state)
+
+
 def cmd_new_checkpoint(args: argparse.Namespace, ctx: Ctx) -> None:
     ctx.say(str(new_checkpoint_path(ctx.layout, _session_id(args, ctx), ctx.now)))
 
@@ -115,37 +127,54 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         raise CliError("context not readable from the transcript (%s)" % type(exc).__name__) from None
     if tokens is None:
         raise CliError("context not readable from the transcript (no messages)")
+    cwd = args.cwd or read_last_cwd(str(transcript)) or os.getcwd()
     if args.stdin:
         text = read_text(ctx.stdin)
         if not text.strip():
             raise CliError("empty checkpoint")
-        checkpoint = write_checkpoint(ctx.layout, session, text, ctx.now)
+        checkpoint = None
     else:
         checkpoint = Path(args.checkpoint).expanduser()
         if not checkpoint.is_file():
             raise CliError("checkpoint not found: %s" % checkpoint)
         if checkpoint.stat().st_size == 0:
             raise CliError("empty checkpoint: %s" % checkpoint)
+        text = checkpoint.read_text(encoding="utf-8", errors="replace")
+    # Checked before anything is written: a checkpoint that cites files the resume cannot find is fixed first.
+    stats = analyze_checkpoint(text, cwd)
+    if stats.missing:
+        raise CliError("files under Re-read not found: %s" % ", ".join(stats.missing))
+    if stats.unchecked:
+        ctx.say("warning: not checked under Re-read: %d entries" % len(stats.unchecked))
+    if checkpoint is None:
+        checkpoint = write_checkpoint(ctx.layout, session, text, ctx.now)
     # SDK hosts (T3 Code) have no /clear: there the session compacts and resumes in place.
     if ctx.env.get(AUTO_RESTART_ENV) == "1":
         restart = "auto"
     else:
         restart = "compact" if ctx.env.get(ENTRYPOINT_ENV, "").startswith("sdk") else "clear"
+    # The cycle the hook opened with its request; a pitstop nobody requested (/pitstop now) starts its own.
+    state = load_state(ctx.layout, session)
+    cycle_id = state.cycle_id if state.requested_at_tokens is not None and state.cycle_id else new_cycle_id()
     record = PendingRecord(
         checkpoint=str(checkpoint.resolve()),
         session_id=session,
-        cwd=args.cwd or read_last_cwd(str(transcript)) or os.getcwd(),
+        cwd=cwd,
         context_tokens=tokens,
         created_at=ctx.now,
         title=read_session_title(str(transcript)),
         plan=args.plan,
         project_dir=str(transcript.parent),
         restart=restart,
+        cycle_id=cycle_id,
     )
     mark_pending(ctx.layout, record)
     prune_old_files(ctx.layout, ctx.now, keep=Path(record.checkpoint))
     log_event(ctx.layout, "cli", "pitstop_done", session_id=session, context_tokens=tokens,
-              checkpoint=record.checkpoint)
+              checkpoint=record.checkpoint, cycle_id=cycle_id, host=ctx.env.get(ENTRYPOINT_ENV, "unknown"),
+              restart=restart, kind=args.kind or "unknown", checkpoint_bytes=stats.bytes,
+              sections_filled=stats.sections_filled, chat_text_filled=stats.chat_text_filled,
+              support_files=stats.support_files, unchecked_entries=len(stats.unchecked))
     config, _ = load_config(ctx.layout)
     ctx.say("checkpoint registered: %s" % record.checkpoint)
     ctx.say("resume window: %d minutes" % config.resume_window_minutes)
@@ -161,7 +190,7 @@ def cmd_gap(args: argparse.Namespace, ctx: Ctx) -> None:
     session = _session_id(args, ctx)
     entry = {"ts": round(ctx.now, 3), "session_id": session, "text": " ".join(args.text).strip()}
     append_line(ctx.layout.gaps, json.dumps(entry, ensure_ascii=False))
-    log_event(ctx.layout, "cli", "gap", session_id=session)
+    log_event(ctx.layout, "cli", "gap", session_id=session, cycle_id=load_state(ctx.layout, session).cycle_id)
     ctx.say("🔋 checkpoint gap recorded")
 
 
@@ -187,6 +216,7 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
     else:
         ctx.say("🔋 pitstop: on")
     ctx.say("notifications: %s" % ("on" if config.notify else "off"))
+    ctx.say("metrics: %s" % ("on" if config.metrics else "off"))
     ctx.say("current context: %s · threshold %s" % (_current_context(args, ctx, session),
                                                  messages.k(config.threshold_tokens)))
     events = read_events(ctx.layout)
@@ -200,15 +230,66 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
                                                              messages.k(int(statistics.median(bases)))))
 
 
+class _Transcripts:
+    def __init__(self, dirs: List[Path]) -> None:
+        self.dirs = dirs
+        self.found: Dict[str, Optional[Path]] = {}
+
+    def get(self, session: Optional[str]) -> Optional[Path]:
+        if not session:
+            return None
+        if session not in self.found:
+            self.found[session] = next((path for path in (find_transcript(session, d) for d in self.dirs)
+                                        if path is not None), None)
+        return self.found[session]
+
+
+def _report_row(cycle: Cycle, cycles: List[Cycle], transcripts: _Transcripts) -> Dict[str, Any]:
+    row = cycle_row(cycle)
+    start = cycle.first_request_ts
+    asked = transcripts.get(cycle.session)
+    if start is not None and asked is not None:
+        end = cycle.done_ts if cycle.done_ts is not None else next_start(cycles, cycle.session, start)
+        row["skips"] = skip_categories(asked, start, end)
+    resumed = transcripts.get(cycle.resume_session)
+    if cycle.resume_ts is not None and resumed is not None:
+        row["post_calls"] = calls_after(resumed, cycle.resume_ts,
+                                        next_start(cycles, cycle.resume_session, cycle.resume_ts))
+    return row
+
+
+def cmd_report(args: argparse.Namespace, ctx: Ctx) -> None:
+    added = 0
+    if args.import_audit:
+        try:
+            added += append_rows(ctx.layout, import_audit(Path(args.import_audit).expanduser()))
+        except (OSError, ValueError) as exc:
+            raise CliError("audit not readable: %s (%s)" % (args.import_audit, type(exc).__name__)) from None
+    stored = {row["cycle_id"] for row in load_rows(ctx.layout)}
+    cycles = build_cycles(read_events(ctx.layout), ctx.now)
+    transcripts = _Transcripts(ctx.report_dirs)
+    rows = [_report_row(c, cycles, transcripts) for c in cycles if c.closed and c.cycle_id not in stored]
+    added += append_rows(ctx.layout, rows)
+    atomic_write_text(ctx.layout.report_stamp, "%d\n" % int(ctx.now))
+    if args.quiet:
+        return
+    all_rows = load_rows(ctx.layout)
+    ctx.say("🔋 pitstop report · %d new cycles · %d in metrics.jsonl" % (added, len(all_rows)))
+    for line in summary(all_rows):
+        ctx.say(line)
+
+
 _COMMANDS = {
     "on": cmd_on,
     "off": cmd_off,
     "off-here": cmd_off_here,
     "notify": cmd_notify,
+    "metrics": cmd_metrics,
     "status": cmd_status,
     "new-checkpoint": cmd_new_checkpoint,
     "mark-pending": cmd_mark_pending,
     "gap": cmd_gap,
+    "report": cmd_report,
 }
 
 
@@ -222,6 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("off-here", help="disable pitstop in the current session").add_argument("--session")
     notify = sub.add_parser("notify", help="macOS notifications")
     notify.add_argument("state", choices=["on", "off"])
+    metrics = sub.add_parser("metrics", help="the daily local report and metrics.jsonl (off by default)")
+    metrics.add_argument("state", choices=["on", "off"])
     status = sub.add_parser("status", help="state, current context and pilot numbers")
     status.add_argument("--session")
     status.add_argument("--transcript")
@@ -232,11 +315,15 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--stdin", action="store_true", help="read the checkpoint text from stdin")
     mark.add_argument("--cwd")
     mark.add_argument("--plan")
+    mark.add_argument("--kind", choices=["code", "other"], help="code: the work lives in the repo's files")
     mark.add_argument("--session")
     mark.add_argument("--transcript")
     gap = sub.add_parser("gap", help="record something the checkpoint was missing")
     gap.add_argument("text", nargs="+")
     gap.add_argument("--session")
+    report = sub.add_parser("report", help="rebuild the pitstop cycles, add the closed ones to metrics.jsonl")
+    report.add_argument("--quiet", action="store_true", help="update metrics.jsonl, print nothing")
+    report.add_argument("--import-audit", metavar="PATH", help="first import the cycles of an audit-data.json")
     return parser
 
 
@@ -261,7 +348,8 @@ def main(argv: List[str], stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout
     args = build_parser().parse_args(argv)
     env = os.environ if env is None else env
     ctx = Ctx(layout, stdin, stdout, env, projects_dir or default_projects_dir(env),
-              time.time() if now is None else now)
+              time.time() if now is None else now,
+              [projects_dir] if projects_dir else projects_dirs(env, Path.home()))
     try:
         _COMMANDS[args.command](args, ctx)
     except (CliError, ConfigError) as exc:
