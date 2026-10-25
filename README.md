@@ -149,8 +149,8 @@ once a day, when a session starts.
 ## Data
 
 Everything stays on your machine, in `~/.claude/pitstop/` (override with `PITSTOP_HOME`): `config.json`,
-`checkpoints/`, `pending/`, `state/`, `log.jsonl`, `gaps.jsonl` and, once you run the report, `metrics.jsonl` and
-`report-last-run.txt`. The log and the metrics hold token counts, states and categories, not conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
+`checkpoints/`, `pending/`, `state/`, `log.jsonl`, `gaps.jsonl` and, once you run the report, `metrics.jsonl`,
+`report-last-run.txt` and two lock files, `metrics.lock` and `report-last-run.lock`. The log and the metrics hold token counts, states and categories, not conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
 instruction. Checkpoints and session state files older than 30 days are deleted at the next pitstop.
 
 ## Development

@@ -67,6 +67,12 @@ class CallsAfterTest(TempLayoutTestCase):
         self.assertEqual(calls_after(path, T, T + 10), 2)
         self.assertEqual(calls_after(path, T, None), 3)
 
+    def test_lines_without_a_message_id_are_not_calls(self):
+        no_id = said("x", T + 1, "m1")
+        del no_id["message"]["id"]
+        path = write_jsonl(self.tmp / "s.jsonl", [no_id, said("y", T + 2, "m2")])
+        self.assertEqual(calls_after(path, T, None), 1)
+
     def test_missing_file_counts_nothing(self):
         self.assertEqual(calls_after(self.tmp / "gone.jsonl", T, None), 0)
         self.assertEqual(skip_categories(self.tmp / "gone.jsonl", T, None), {})

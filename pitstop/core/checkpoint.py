@@ -2,7 +2,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 CHAT_TEXT = "Chat-only text"
 REREAD = "Re-read"
@@ -11,6 +11,8 @@ TEMPLATE_TITLES = frozenset({"Goal", "Current state", "Next action", CHAT_TEXT, 
                              "Discarded", REREAD, "Unsaved or uncommitted work", "Open questions", "Suggested skills"})
 EMPTY = "—"
 _BACKTICKS = re.compile(r"`([^`]+)`")
+# Between two paths of one entry: a comma, a semicolon, "and", "e" or "&".
+_SEPARATOR = re.compile(r"^\s*(,|;|&|\band\b|\be\b)?\s*")
 _LINE_SUFFIX = re.compile(r":\d+(-\d+)?$")
 _PATTERN_CHARS = set("*?{}[]<>")
 
@@ -60,14 +62,8 @@ def _resolve(path: str, cwd: str) -> str:
     return path if os.path.isabs(path) else os.path.join(cwd, path)
 
 
-def _check_entry(entry: str, cwd: str) -> str:
-    """"ok", "missing" or "unchecked" for one Re-read line (without its leading "- ")."""
-    if not entry.startswith("`") or "origin/" in entry:
-        return "unchecked"
-    match = _BACKTICKS.match(entry)
-    if match is None:
-        return "unchecked"
-    cited = match.group(1).strip()
+def _check_path(cited: str, cwd: str) -> str:
+    """"ok", "missing" or "unchecked" for one cited path."""
     if "://" in cited or _PATTERN_CHARS & set(cited):
         return "unchecked"
     path = _resolve(_LINE_SUFFIX.sub("", cited), cwd)
@@ -77,11 +73,37 @@ def _check_entry(entry: str, cwd: str) -> str:
     return "missing" if os.path.isdir(os.path.dirname(os.path.normpath(path))) else "unchecked"
 
 
-def analyze_checkpoint(text: str, cwd: str) -> CheckpointStats:
+def _leading_paths(entry: str) -> List[str]:
+    """The backticked paths an entry starts with (`a`, `b` and `c` — why): the reason after them may name code."""
+    paths = []
+    rest = entry
+    while True:
+        match = _BACKTICKS.match(rest)
+        if match is None:
+            return paths
+        paths.append(match.group(1).strip())
+        rest = _SEPARATOR.sub("", rest[match.end():], count=1)
+
+
+def _check_entry(entry: str, cwd: str) -> Tuple[List[str], bool]:
+    """The missing paths of one Re-read line (without its leading "- "), and whether any part was left unchecked."""
+    paths = _leading_paths(entry) if "origin/" not in entry else []
+    if not paths:
+        return [], True
+    results = [(path, _check_path(path, cwd)) for path in paths]
+    return [path for path, result in results if result == "missing"], any(r == "unchecked" for _, r in results)
+
+
+def _in_folder(path: str, folder: str) -> bool:
+    return os.path.realpath(os.path.dirname(path)) == os.path.realpath(folder)
+
+
+def analyze_checkpoint(text: str, cwd: str, support_dir: str) -> CheckpointStats:
+    """support_dir: where support files live (next to the checkpoint); files cited elsewhere are not counted."""
     sections = _sections(text)
     chat = sections.get(CHAT_TEXT, "")
-    support = sum(1 for cited in _BACKTICKS.findall(chat)
-                  if os.path.isfile(_resolve(_LINE_SUFFIX.sub("", cited.strip()), cwd)))
+    cited = (_resolve(_LINE_SUFFIX.sub("", path.strip()), cwd) for path in _BACKTICKS.findall(chat))
+    support = sum(1 for path in cited if os.path.isfile(path) and _in_folder(path, support_dir))
     missing: List[str] = []
     unchecked: List[str] = []
     for line in sections.get(REREAD, "").splitlines():
@@ -90,10 +112,9 @@ def analyze_checkpoint(text: str, cwd: str) -> CheckpointStats:
         entry = line[2:].strip()
         if not entry or entry == EMPTY:
             continue
-        result = _check_entry(entry, cwd)
-        if result == "missing":
-            missing.append(_BACKTICKS.match(entry).group(1).strip())
-        elif result == "unchecked":
+        lost, partly_unchecked = _check_entry(entry, cwd)
+        missing.extend(lost)
+        if partly_unchecked and not lost:
             unchecked.append(entry)
     return CheckpointStats(
         bytes=len(text.encode("utf-8")),
