@@ -18,8 +18,9 @@ class PluginFilesTest(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "hooks" / "register.ts").is_file())
         hooks = config["hooks"]
         self.assertEqual(set(hooks), {"Stop", "PostToolBatch", "UserPromptSubmit", "SessionStart", "PreToolUse"})
-        self.assertEqual([entry["matcher"] for entry in hooks["SessionStart"]], ["compact", "startup"])
-        self.assertEqual(hooks["SessionStart"][1]["hooks"], hooks["SessionStart"][0]["hooks"])
+        # Every source (startup, resume, clear, compact): the daily report; the resume itself is for compact only.
+        self.assertEqual(len(hooks["SessionStart"]), 1)
+        self.assertNotIn("matcher", hooks["SessionStart"][0])
         self.assertEqual(hooks["PreToolUse"][0]["matcher"], "mcp__t3-code__t3_thread_send")
         for event, arg in (("Stop", "stop"), ("PostToolBatch", "post-tool-batch"),
                            ("UserPromptSubmit", "user-prompt-submit"), ("SessionStart", "session-start"),

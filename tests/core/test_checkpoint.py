@@ -26,7 +26,7 @@ class AnalyzeCheckpointTest(TempLayoutTestCase):
         (self.cwd / "pitstop" / "cli.py").write_text("x", encoding="utf-8")
 
     def analyze(self, chat="—", reread="—"):
-        return analyze_checkpoint(TEMPLATE.format(chat=chat, reread=reread), str(self.cwd))
+        return analyze_checkpoint(TEMPLATE.format(chat=chat, reread=reread), str(self.cwd), str(self.cwd))
 
     def test_counts_sections_and_chat_text(self):
         (self.cwd / "table.md").write_text("| a |", encoding="utf-8")
@@ -50,6 +50,21 @@ class AnalyzeCheckpointTest(TempLayoutTestCase):
         self.assertEqual(stats.missing, ["pitstop/gone.py:3"])
         self.assertEqual(stats.unchecked, [])
 
+    def test_every_path_before_the_reason_is_checked(self):
+        stats = self.analyze(reread="- `pitstop/cli.py`, `pitstop/gone.py` — both\n"
+                                    "- `pitstop/cli.py` and `pitstop/lost.py:4` — two\n"
+                                    "- `pitstop/cli.py` — where `cmd_report` and `no/such.py` are named")
+        self.assertEqual(stats.missing, ["pitstop/gone.py", "pitstop/lost.py:4"])
+        self.assertEqual(stats.unchecked, [])
+
+    def test_support_files_are_only_files_in_the_support_folder(self):
+        support = self.tmp / "checkpoints"
+        support.mkdir()
+        (support / "cp-chat.md").write_text("table", encoding="utf-8")
+        text = TEMPLATE.format(chat="- `%s` — the table\n- `pitstop/cli.py:3` — cited" % (support / "cp-chat.md"),
+                               reread="—")
+        self.assertEqual(analyze_checkpoint(text, str(self.cwd), str(support)).support_files, 1)
+
     def test_aliases_globs_branches_and_prose_are_unchecked(self):
         stats = self.analyze(reread="- `S/a.md` — spec alias\n- `08{7,8}_*.sql` — migrations\n"
                                     "- `s<N>.jpg` — screenshots\n- `pitstop/cli.py` su origin/staging\n"
@@ -59,7 +74,7 @@ class AnalyzeCheckpointTest(TempLayoutTestCase):
 
     def test_no_reread_section_or_italian_headings_checks_nothing(self):
         text = "# checkpoint\n\n## Obiettivo\nX\n## Da rileggere\n- `pitstop/gone.py` — no\n"
-        stats = analyze_checkpoint(text, str(self.cwd))
+        stats = analyze_checkpoint(text, str(self.cwd), str(self.cwd))
         self.assertEqual((stats.missing, stats.unchecked), ([], []))
         self.assertEqual(stats.sections_filled, 2)
 
@@ -67,7 +82,7 @@ class AnalyzeCheckpointTest(TempLayoutTestCase):
         text = ("# pitstop checkpoint — x\n\n## Goal\nship\n\n## Chat-only text\nMy last answer:\n\n"
                 "## Summary of options\n- A\n\n```markdown\n## Re-read\n- `nowhere/missing.md` — example\n```\n\n"
                 "## Re-read\n—\n\n## Open questions\n—\n")
-        stats = analyze_checkpoint(text, str(self.tmp))
+        stats = analyze_checkpoint(text, str(self.tmp), str(self.tmp))
         self.assertEqual((stats.sections_filled, stats.chat_text_filled), (2, True))
         self.assertEqual((stats.missing, stats.unchecked), ([], []))
 

@@ -99,6 +99,7 @@ def calls_after(path: Path, start: float, end: Optional[float]) -> int:
     ids = set()
     for entry in _main_assistant(path, start, end, b'"usage"'):
         message = entry["message"]
-        if isinstance(message.get("usage"), dict) and message.get("model") != "<synthetic>":
+        if (isinstance(message.get("usage"), dict) and message.get("model") != "<synthetic>"
+                and isinstance(message.get("id"), str)):
             ids.add(message.get("id"))
     return len(ids)

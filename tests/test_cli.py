@@ -116,8 +116,12 @@ class MarkPendingTest(CliTestCase):
         self.assertIsNotNone(consume_pending(self.layout, "s1", str(self.tmp), NOW, 10))
 
     def test_done_event_carries_checkpoint_stats_and_kind(self):
-        (self.tmp / "notes.md").write_text("n", encoding="utf-8")
-        text = "# cp\n\n## Next action\nGo.\n## Chat-only text\nSee `notes.md`.\n## Re-read\n- `S/x` — alias\n"
+        notes = self.layout.checkpoints_dir / "cp-chat.md"
+        notes.parent.mkdir(parents=True)
+        notes.write_text("n", encoding="utf-8")
+        (self.tmp / "repo-file.md").write_text("r", encoding="utf-8")
+        text = ("# cp\n\n## Next action\nGo.\n## Chat-only text\nSee `%s` and `repo-file.md`.\n## Re-read\n"
+                "- `S/x` — alias\n" % notes)
         code, _ = self.cli("mark-pending", "--stdin", "--kind", "other", "--cwd", str(self.tmp), stdin_text=text)
         self.assertEqual(code, 0)
         done = read_events(self.layout)[0]

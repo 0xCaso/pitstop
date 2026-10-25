@@ -141,7 +141,7 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
             raise CliError("empty checkpoint: %s" % checkpoint)
         text = checkpoint.read_text(encoding="utf-8", errors="replace")
     # Checked before anything is written: a checkpoint that cites files the resume cannot find is fixed first.
-    stats = analyze_checkpoint(text, cwd)
+    stats = analyze_checkpoint(text, cwd, str(ctx.layout.checkpoints_dir))
     if stats.missing:
         raise CliError("files under Re-read not found: %s" % ", ".join(stats.missing))
     if stats.unchecked:
