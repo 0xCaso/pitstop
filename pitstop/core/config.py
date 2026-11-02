@@ -96,7 +96,11 @@ def update_config(layout: Layout, **changes: Any) -> Config:
         raise ConfigError("config.json must contain a JSON object: fix or delete it")
     raw.update(changes)
     config = parse_config(raw)
-    atomic_write_text(layout.config, json.dumps(asdict(config), indent=2) + "\n")
+    # Soft and hard limits the file does not set stay derived from the threshold: written out, they would freeze
+    # and a later threshold edit could put the three limits out of order.
+    saved = {key: value for key, value in asdict(config).items()
+             if key in raw or key not in ("soft_threshold_tokens", "hard_threshold_tokens")}
+    atomic_write_text(layout.config, json.dumps(saved, indent=2) + "\n")
     return config
 
 

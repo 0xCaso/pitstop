@@ -123,6 +123,12 @@ def _open_offer(state: SessionState, tokens: int) -> str:
     return cycle_id
 
 
+def _checkpoint_waiting(layout: Layout, session_id: str, now: float, config: Config) -> bool:
+    """The session already registered a checkpoint and waits for its restart (the user has not run /clear yet):
+    past the hard limit, asking again would only make Claude write the same checkpoint twice."""
+    return has_session_pending(layout, session_id, now, config.resume_window_minutes)
+
+
 def _offer(inp: HookInput, layout: Layout, config: Config, tokens: int, cycle_id: str) -> str:
     """Soft zone: a quiet offer at the end of a turn. No banner and no notification: the user sees something only
     if Claude takes it."""
@@ -150,7 +156,8 @@ def _request(inp: HookInput, layout: Layout, notifier: Notifier, config: Config,
     context = messages.hard_request_context(tokens, config.hard_threshold_tokens, config.retrigger_step_tokens,
                                             inp.cwd, str(CLI_PATH), str(SKILL_PATH), background_tasks)
     banner = messages.banner_hard(tokens)
-    if output_event == "Stop" and background_tasks == 0:
+    if output_event == "Stop" and background_tasks == 0 and host() != "sdk-cli":
+        # (`claude -p` is left alone: a block would replace its answer with the pitstop.)
         # Past the hard limit, with nothing running: Claude does not stop, it does the pitstop. Claude Code sends
         # the next Stop with stop_hook_active, and decide() never blocks that one.
         return build_output(output_event, system_message=banner, block_reason=context)
@@ -183,6 +190,8 @@ def _handle_stop(inp: HookInput, layout: Layout, notifier: Notifier, now: float)
         segment_start(config, state, tokens)
         event = Event("stop", tokens, stop_hook_active=inp.stop_hook_active)
         action = decide(config, state, event).action
+        if action == HARD and _checkpoint_waiting(layout, inp.session_id, now, config):
+            return None
         if action == OFFER:
             cycle_id = _open_offer(state, tokens)
         elif action in (REQUEST, HARD):
@@ -213,6 +222,8 @@ def _handle_post_tool_batch(inp: HookInput, layout: Layout, notifier: Notifier, 
         _maybe_log_resume_base(layout, state, "post_tool_batch", inp.session_id, tokens)
         segment_start(config, state, tokens)
         action = decide(config, state, Event("post_tool_batch", tokens)).action
+        if action == HARD and _checkpoint_waiting(layout, inp.session_id, now, config):
+            return None
         if action not in (REQUEST, HARD):
             return None  # OFFER is Stop-only: decide() never returns it here
         cycle_id = _open_request(state, tokens)

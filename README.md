@@ -126,7 +126,8 @@ An invalid file turns pitstop off and says why once, until the file changes.
 
 - `Stop` and `PostToolBatch` hooks read the context size from the session transcript. In the soft zone `Stop`
   offers a pitstop once. Past the threshold they ask Claude for a pitstop, once per segment. Past the hard limit
-  `Stop` blocks the end of the turn until Claude does the pitstop, unless background tasks are running. A context
+  `Stop` blocks the end of the turn until Claude does the pitstop, unless background tasks are running, a
+  checkpoint already waits for its restart, or the session runs under `claude -p`. A context
   back under the soft limit (a `/compact` outside pitstop) starts a new segment.
 - The `pitstop` skill writes and registers the checkpoint in one call to the `bin/pitstop` CLI, then restarts the
   session. The CLI refuses a checkpoint that cites, under Re-read, a file that does not exist, so Claude fixes it
