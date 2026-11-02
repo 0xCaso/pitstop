@@ -99,9 +99,11 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
      Then end your turn. Queue nothing and do not run `/compact` yourself: the module does both when the turn
      ends.
    - **`restart: compact`** (T3 Code and other SDK hosts: `/clear` does not work there). If the tools
-     `mcp__t3-code__t3_thread_configuration` and `mcp__t3-code__t3_thread_send` exist (load them with ToolSearch
-     if they are deferred):
-     1. Call `t3_thread_configuration` without `threadId`: it returns this thread's id.
+     `mcp__t3-code__t3_thread_configure` (older T3 Code: `t3_thread_configuration`) and
+     `mcp__t3-code__t3_thread_send` exist (load them with ToolSearch if they are deferred; search `t3_thread_config`
+     to match either name):
+     1. Call whichever of `t3_thread_configure` / `t3_thread_configuration` exists, without `threadId`: it returns
+        this thread's id.
      2. Call `t3_thread_send` with that `threadId`, `mode: "queue"` and, as `message`, exactly the text after
         `queue 1: ` in mark-pending's output (today `/compact One-line summary: "Resume from the pitstop checkpoint."`).
         T3 Code runs it as soon as this turn ends; the compacted session receives the checkpoint by itself.
