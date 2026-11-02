@@ -229,6 +229,7 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
     if bases:
         ctx.say("real resume size: last %s · median %s" % (messages.k(bases[-1]),
                                                              messages.k(int(statistics.median(bases)))))
+    ctx.say("folder: %s" % ctx.layout.base)
 
 
 class _Transcripts:
