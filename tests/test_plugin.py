@@ -72,3 +72,24 @@ class PluginFilesTest(unittest.TestCase):
         for needle in ("`/pitstop metrics on`", "`pitstop metrics on`", "`/pitstop report`", "`pitstop report`"):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
+
+
+class ZonesPluginTest(unittest.TestCase):
+    def test_skill_has_offer_and_hard_modes_and_chat_heavy_checkpoints(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        for needle in ("mode: offer", "mode: hard", "For --kind other",
+                       "an offer is not a request and needs no skip line",
+                       "No exceptions except [background-tasks]."):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+
+    def test_readme_documents_the_three_limits(self):
+        text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        for needle in ("soft_threshold_tokens", "hard_threshold_tokens"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+
+    def test_versions_are_0_3_0(self):
+        for path in (REPO_ROOT / "package.json", REPO_ROOT / ".claude-plugin" / "plugin.json"):
+            with self.subTest(path=path.name):
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.3.0")
