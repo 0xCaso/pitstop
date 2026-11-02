@@ -153,9 +153,10 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         restart = "auto"
     else:
         restart = "compact" if ctx.env.get(ENTRYPOINT_ENV, "").startswith("sdk") else "clear"
-    # The cycle the hook opened with its request; a pitstop nobody requested (/pitstop now) starts its own.
+    # The cycle the hook opened with its offer or request; a pitstop nobody asked for (/pitstop now) starts its own.
     state = load_state(ctx.layout, session)
-    cycle_id = state.cycle_id if state.requested_at_tokens is not None and state.cycle_id else new_cycle_id()
+    asked = state.requested_at_tokens is not None or state.offered_at_tokens is not None
+    cycle_id = state.cycle_id if asked and state.cycle_id else new_cycle_id()
     record = PendingRecord(
         checkpoint=str(checkpoint.resolve()),
         session_id=session,

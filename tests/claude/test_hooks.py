@@ -42,7 +42,17 @@ class HookTestCase(TempLayoutTestCase):
         return [e["error"] for e in read_events(self.layout) if e["action"] == "error"]
 
 
-class StopHookTest(HookTestCase):
+class PendingMixin:
+    def pending(self, **overrides):
+        checkpoint = self.tmp / "cp.md"
+        checkpoint.write_text("# Checkpoint\nprossima azione: X", encoding="utf-8")
+        values = dict(checkpoint=str(checkpoint), session_id="s1", cwd="/work/repo", context_tokens=212000,
+                      created_at=NOW - 60, title="Titolo", plan=None)
+        values.update(overrides)
+        mark_pending(self.layout, PendingRecord(**values))
+
+
+class StopHookTest(PendingMixin, HookTestCase):
     def test_below_soft_limit_is_silent(self):
         self.add_turn(169999)
         self.assertIsNone(self.call_hook("stop"))
@@ -146,6 +156,22 @@ class StopHookTest(HookTestCase):
         self.assertIsNone(self.call_hook("stop", stop_hook_active=True))
         self.assertEqual(len([e for e in read_events(self.layout) if e["action"] == "request"]), 1)
 
+    def test_stop_past_hard_is_silent_while_a_checkpoint_waits_for_the_restart(self):
+        self.add_turn(285000)
+        self.assertEqual(self.call_hook("stop")["decision"], "block")
+        self.pending(session_id="s1", context_tokens=285000)
+        self.add_turn(290000)
+        self.assertIsNone(self.call_hook("stop"))
+        self.add_turn(345000)
+        self.assertIsNone(self.call_hook("post-tool-batch"))
+
+    def test_claude_p_is_never_blocked(self):
+        self.add_turn(285000)
+        with mock.patch.dict("os.environ", {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+            out = self.call_hook("stop")
+        self.assertNotIn("decision", out)
+        self.assertIn("past the 280K hard limit", out["hookSpecificOutput"]["additionalContext"])
+
     def test_request_logs_zone(self):
         self.add_turn(212345)
         self.call_hook("stop")
@@ -196,16 +222,6 @@ class PostToolBatchHookTest(HookTestCase):
             reader.assert_not_called()
         self.add_turn(212345)
         self.assertIsNotNone(self.call_hook("post-tool-batch"))
-
-
-class PendingMixin:
-    def pending(self, **overrides):
-        checkpoint = self.tmp / "cp.md"
-        checkpoint.write_text("# Checkpoint\nprossima azione: X", encoding="utf-8")
-        values = dict(checkpoint=str(checkpoint), session_id="s1", cwd="/work/repo", context_tokens=212000,
-                      created_at=NOW - 60, title="Titolo", plan=None)
-        values.update(overrides)
-        mark_pending(self.layout, PendingRecord(**values))
 
 
 class ResumeHookTest(PendingMixin, HookTestCase):
@@ -467,6 +483,19 @@ class CycleIdHookTest(PendingMixin, HookTestCase):
         later = self.events("request")[-1]["cycle_id"]
         self.assertRegex(later, r"^[0-9a-f]{12}$")
         self.assertNotEqual(later, cycle)
+
+    def test_accepted_offer_and_its_checkpoint_share_the_cycle_id(self):
+        from pitstop.cli import main
+        import io
+        self.add_turn(175000)
+        self.assertIsNotNone(self.call_hook("stop"))
+        projects = self.tmp / "projects"
+        write_jsonl(projects / "-work-repo" / "s1.jsonl", [user_line(), assistant_line()])
+        code = main(["mark-pending", "--stdin", "--cwd", "/work/repo"], stdin=io.StringIO("# cp\n"),
+                    stdout=io.StringIO(), env={"CLAUDE_CODE_SESSION_ID": "s1"}, layout=self.layout,
+                    projects_dir=projects, now=NOW)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.events("pitstop_done")[0]["cycle_id"], self.events("offer")[0]["cycle_id"])
 
     def test_record_without_cycle_id_still_resumes(self):
         checkpoint = self.tmp / "cp.md"

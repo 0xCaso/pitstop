@@ -99,6 +99,25 @@ class UpdateConfigTest(TempLayoutTestCase):
         config = update_config(self.layout, notify=False)
         self.assertEqual((config.threshold_tokens, config.notify), (60000, False))
 
+    def test_toggle_does_not_freeze_derived_limits(self):
+        self.layout.base.mkdir(parents=True)
+        self.layout.config.write_text('{"threshold_tokens": 120000}', encoding="utf-8")
+        update_config(self.layout, notify=False)
+        saved = json.loads(self.layout.config.read_text(encoding="utf-8"))
+        self.assertNotIn("soft_threshold_tokens", saved)
+        self.assertNotIn("hard_threshold_tokens", saved)
+        saved["threshold_tokens"] = 300000
+        self.layout.config.write_text(json.dumps(saved), encoding="utf-8")
+        config, error = load_config(self.layout)
+        self.assertIsNone(error)
+        self.assertEqual((config.soft_threshold_tokens, config.hard_threshold_tokens), (270000, 380000))
+
+    def test_explicit_limits_are_kept(self):
+        update_config(self.layout, soft_threshold_tokens=150000)
+        update_config(self.layout, notify=False)
+        saved = json.loads(self.layout.config.read_text(encoding="utf-8"))
+        self.assertEqual(saved["soft_threshold_tokens"], 150000)
+
     def test_refuses_to_overwrite_invalid_file(self):
         self.layout.base.mkdir(parents=True)
         self.layout.config.write_text("{nope", encoding="utf-8")
