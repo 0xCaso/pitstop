@@ -1,11 +1,22 @@
 import json
 
 from pitstop.core.fsutil import LockTimeout
-from pitstop.core.state import SessionState, load_state, locked_state, session_key
+from pitstop.core.state import SessionState, load_state, locked_state, save_state, session_key
 from tests.helpers import TempLayoutTestCase
 
 
 class StateTest(TempLayoutTestCase):
+    def test_offered_at_tokens_roundtrip(self):
+        with locked_state(self.layout, "s") as state:
+            state.offered_at_tokens = 175000
+        self.assertEqual(load_state(self.layout, "s").offered_at_tokens, 175000)
+        save_state(self.layout, SessionState("s"))
+        path = self.layout.state_dir / "s.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw["offered_at_tokens"] = "x"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        self.assertIsNone(load_state(self.layout, "s").offered_at_tokens)
+
     def test_missing_state_is_fresh(self):
         self.assertEqual(load_state(self.layout, "abc"), SessionState(session_id="abc"))
 
