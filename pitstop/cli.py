@@ -217,8 +217,9 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
         ctx.say("🔋 pitstop: on")
     ctx.say("notifications: %s" % ("on" if config.notify else "off"))
     ctx.say("metrics: %s" % ("on" if config.metrics else "off"))
-    ctx.say("current context: %s · threshold %s" % (_current_context(args, ctx, session),
-                                                 messages.k(config.threshold_tokens)))
+    ctx.say("current context: %s · soft %s · threshold %s · hard %s" % (
+        _current_context(args, ctx, session), messages.k(config.soft_threshold_tokens),
+        messages.k(config.threshold_tokens), messages.k(config.hard_threshold_tokens)))
     events = read_events(ctx.layout)
     done = sum(1 for e in events if e.get("action") == "pitstop_done")
     gaps = sum(1 for e in events if e.get("action") == "gap")

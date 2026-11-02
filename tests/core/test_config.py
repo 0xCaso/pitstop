@@ -20,6 +20,24 @@ class ParseConfigTest(unittest.TestCase):
         with self.assertRaises(ConfigError):
             parse_config({"metrics": "on"})
 
+    def test_defaults_three_limits(self):
+        config = Config()
+        self.assertEqual((config.soft_threshold_tokens, config.threshold_tokens, config.hard_threshold_tokens),
+                         (170000, 200000, 280000))
+
+    def test_order_enforced(self):
+        for raw in ({"soft_threshold_tokens": 200000}, {"hard_threshold_tokens": 200000}):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ConfigError) as caught:
+                    parse_config(raw)
+                self.assertIn("soft_threshold_tokens < threshold_tokens < hard_threshold_tokens", str(caught.exception))
+
+    def test_missing_limits_follow_threshold(self):
+        config = parse_config({"threshold_tokens": 120000})
+        self.assertEqual((config.soft_threshold_tokens, config.hard_threshold_tokens), (90000, 200000))
+        config = parse_config({"threshold_tokens": 60000})
+        self.assertEqual((config.soft_threshold_tokens, config.hard_threshold_tokens), (50000, 140000))
+
     def test_unknown_keys_are_ignored(self):
         self.assertEqual(parse_config({"future": 1}), Config())
 
