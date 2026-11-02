@@ -18,7 +18,7 @@ SKIP_KEYS = SKIP_CATEGORIES + ("unparsed",)
 ROW_FIELDS = frozenset(
     {"cycle_id", "v", "skill", "host", "kind", "first_request_ts", "request_tokens", "requests", "last_request_ts",
      "done_ts", "done_tokens", "restart", "resume_ts", "resume_base", "gaps", "dropped", "expired", "outcome",
-     "post_calls", "reduction"}
+     "post_calls", "reduction", "first_offer_ts", "offers", "hard_requests"}
 )
 _SCALARS = (str, int, float, bool)
 EMPTY = "—"
@@ -153,6 +153,12 @@ def _summary_line(version: str, rows: List[Dict[str, Any]]) -> List[str]:
             skips[key] = skips.get(key, 0) + count
     if skips:
         lines.append("  skips: " + " · ".join("%s %d" % (key, skips[key]) for key in SKIP_KEYS if key in skips))
+    # Shown only for versions that had offers or reached the hard limit (0.3+); older rows may carry zeros.
+    offered = [row for row in rows if (_int(row.get("offers")) or 0) > 0]
+    hard = [row for row in rows if (_int(row.get("hard_requests")) or 0) > 0]
+    if offered or hard:
+        accepted = [row for row in offered if not row.get("requests") and row.get("done_ts") is not None]
+        lines.append("  zones: offers accepted %d/%d · hard %d" % (len(accepted), len(offered), len(hard)))
     kinds: Dict[str, int] = {}
     for row in rows:
         kind = row.get("kind") if isinstance(row.get("kind"), str) else "unknown"
