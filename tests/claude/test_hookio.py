@@ -45,5 +45,9 @@ class BuildOutputTest(unittest.TestCase):
     def test_banner_only_output_has_no_specific_block(self):
         self.assertEqual(json.loads(build_output("Stop", system_message="b")), {"systemMessage": "b"})
 
+    def test_build_output_block(self):
+        out = json.loads(build_output("Stop", system_message="b", block_reason="do it"))
+        self.assertEqual(out, {"systemMessage": "b", "decision": "block", "reason": "do it"})
+
     def test_output_is_ascii_safe(self):
         self.assertTrue(build_output("Stop", system_message="🔋").isascii())

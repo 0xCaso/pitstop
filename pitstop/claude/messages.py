@@ -30,6 +30,10 @@ def banner_triggered(tokens: int) -> str:
     return "🔋 pitstop · %s → pitting at the next clean point" % k(tokens)
 
 
+def banner_hard(tokens: int) -> str:
+    return "🔋 pitstop · %s → past the hard limit, pitstop now" % k(tokens)
+
+
 def banner_resumed(tokens: int) -> str:
     return "🔋 pitstop · resumed from %s" % k(tokens)
 
@@ -77,25 +81,46 @@ _SKILL_POINTER = (
     "- cwd: {cwd}\n"
     "- cli: /usr/bin/python3 {cli}\n"
     "- background tasks running: {background}\n"
-    "- if you skip, the next request comes after +{step} tokens\n"
+    "- {skip}\n"
 )
 
 
 def _request_context(head: str, mode: str, tokens: int, threshold: int, step: int, cwd: str, cli: str,
-                     skill: str, background_tasks: Optional[int]) -> str:
+                     skill: str, background_tasks: Optional[int],
+                     skip: str = "if you skip, the next request comes at the {hard} hard limit", hard: int = 0,
+                     soft: int = 0) -> str:
     background = "unknown, check yourself" if background_tasks is None else str(background_tasks)
-    return (head + _SKILL_POINTER).format(k=k(tokens), threshold=k(threshold), tokens=tokens, step=step, cwd=cwd,
-                                          cli=cli, skill=skill, background=background, mode=mode)
+    values = dict(k=k(tokens), threshold=k(threshold), hard=k(hard), soft=k(soft), tokens=tokens, step=step,
+                  cwd=cwd, cli=cli, skill=skill, background=background, mode=mode)
+    return (head + _SKILL_POINTER.replace("{skip}", skip)).format(**values)
+
+
+def offer_context(tokens: int, soft: int, threshold: int, cwd: str, cli: str, skill: str,
+                  background_tasks: Optional[int] = None) -> str:
+    head = ("[pitstop] Main-thread context is {k}, in the soft zone ({soft}–{threshold}). Pitstop only if the work "
+            "is at a natural boundary right now; otherwise carry on and print nothing.\n")
+    return _request_context(head, "offer", tokens, threshold, 0, cwd, cli, skill, background_tasks,
+                            skip="if you carry on, the request comes at the {threshold} threshold", soft=soft)
+
+
+def hard_request_context(tokens: int, hard: int, step: int, cwd: str, cli: str, skill: str,
+                         background_tasks: Optional[int]) -> str:
+    head = ("[pitstop] Main-thread context is {k}, past the {hard} hard limit. Pitstop now. Skip only if subagents "
+            "or background tasks are running (category background-tasks).\n")
+    return _request_context(head, "hard", tokens, hard, step, cwd, cli, skill, background_tasks,
+                            skip="if you skip, the request comes again at the end of this turn, and after +{step} "
+                                 "tokens during it", hard=hard)
 
 
 def stop_request_context(tokens: int, threshold: int, step: int, cwd: str, cli: str, skill: str,
-                         background_tasks: Optional[int]) -> str:
+                         background_tasks: Optional[int], *, hard: int) -> str:
     head = "[pitstop] Main-thread context is {k}, over the {threshold} threshold. Pitstop now, at this clean point.\n"
-    return _request_context(head, "conversation", tokens, threshold, step, cwd, cli, skill, background_tasks)
+    return _request_context(head, "conversation", tokens, threshold, step, cwd, cli, skill, background_tasks,
+                            hard=hard)
 
 
 def batch_request_context(tokens: int, threshold: int, step: int, cwd: str, cli: str, skill: str,
-                          background_tasks: Optional[int]) -> str:
+                          background_tasks: Optional[int], *, hard: int) -> str:
     head = (
         "[pitstop] Main-thread context is {k}, over the {threshold} threshold. Pitstop at the next clean boundary, "
         "not in the middle of a step.\n"
@@ -104,7 +129,7 @@ def batch_request_context(tokens: int, threshold: int, step: int, cwd: str, cli:
         "step. At the boundary, do the pitstop before starting anything new.\n"
     )
     mode = "superpowers if a superpowers spec, plan or ledger is in use, otherwise conversation"
-    return _request_context(head, mode, tokens, threshold, step, cwd, cli, skill, background_tasks)
+    return _request_context(head, mode, tokens, threshold, step, cwd, cli, skill, background_tasks, hard=hard)
 
 
 def previous_transcript(record: PendingRecord) -> Optional[str]:

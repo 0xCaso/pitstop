@@ -10,7 +10,7 @@ from pitstop.core.paths import Layout
 ALLOWED_FIELDS = frozenset(
     {"session_id", "context_tokens", "threshold", "reason", "error", "checkpoint", "resume_base", "resumed_from",
      "cycle_id", "host", "kind", "restart", "checkpoint_bytes", "sections_filled", "chat_text_filled",
-     "support_files", "unchecked_entries"}
+     "support_files", "unchecked_entries", "zone"}
 )
 _SCALARS = (str, int, float, bool)
 
