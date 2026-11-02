@@ -215,7 +215,7 @@ class StatusAndGapTest(CliTestCase):
             "🔋 pitstop: on",
             "notifications: on",
             "metrics: off",
-            "current context: 212K · threshold 200K",
+            "current context: 212K · soft 170K · threshold 200K · hard 280K",
             "pitstops: 1 · real resumes: 2 · gaps: 1",
             "real resume size: last 90K · median 80K",
         ])
