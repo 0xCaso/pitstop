@@ -42,13 +42,23 @@ class HookTestCase(TempLayoutTestCase):
         return [e["error"] for e in read_events(self.layout) if e["action"] == "error"]
 
 
-class StopHookTest(HookTestCase):
-    def test_below_threshold_is_silent(self):
-        self.add_turn(199999)
+class PendingMixin:
+    def pending(self, **overrides):
+        checkpoint = self.tmp / "cp.md"
+        checkpoint.write_text("# Checkpoint\nprossima azione: X", encoding="utf-8")
+        values = dict(checkpoint=str(checkpoint), session_id="s1", cwd="/work/repo", context_tokens=212000,
+                      created_at=NOW - 60, title="Titolo", plan=None)
+        values.update(overrides)
+        mark_pending(self.layout, PendingRecord(**values))
+
+
+class StopHookTest(PendingMixin, HookTestCase):
+    def test_below_soft_limit_is_silent(self):
+        self.add_turn(169999)
         self.assertIsNone(self.call_hook("stop"))
         self.assertEqual(read_events(self.layout), [])
 
-    def test_over_threshold_requests_once_per_step(self):
+    def test_over_threshold_requests_once_per_segment(self):
         self.add_turn(212345)
         out = self.call_hook("stop")
         self.assertEqual(out["systemMessage"], "🔋 pitstop · 212K → pitting at the next clean point")
@@ -60,8 +70,8 @@ class StopHookTest(HookTestCase):
         self.assertEqual(self.notes, [("pitstop", "Pitting at 212K: checkpoint at the next clean point")])
         self.assertIsNone(self.call_hook("stop"))
         self.add_turn(262345)
-        self.assertIsNotNone(self.call_hook("stop"))
-        self.assertEqual([e["action"] for e in read_events(self.layout)], ["request", "request"])
+        self.assertIsNone(self.call_hook("stop"))
+        self.assertEqual([e["action"] for e in read_events(self.layout)], ["request"])
 
     def test_compaction_outside_pitstop_brings_the_next_request_back_to_the_threshold(self):
         self.add_turn(220000)
@@ -87,14 +97,88 @@ class StopHookTest(HookTestCase):
 
     def test_notify_off_sends_no_notification(self):
         update_config(self.layout, notify=False)
-        self.add_turn(300000)
+        self.add_turn(212345)
         self.assertIsNotNone(self.call_hook("stop"))
         self.assertEqual(self.notes, [])
 
     def test_background_tasks_are_reported(self):
-        self.add_turn(300000)
+        self.add_turn(212345)
         out = self.call_hook("stop", background_tasks=[{"id": "a"}])
         self.assertIn("background tasks running: 1", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_stop_in_soft_zone_offers_once(self):
+        self.add_turn(175000)
+        out = self.call_hook("stop")
+        context = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("soft zone", context)
+        self.assertIn("mode: offer", context)
+        self.assertIn("background tasks running: 0", context)
+        self.assertNotIn("systemMessage", out)
+        self.assertNotIn("decision", out)
+        self.assertEqual(self.notes, [])
+        self.add_turn(178000)
+        self.assertIsNone(self.call_hook("stop"))
+        actions = [e["action"] for e in read_events(self.layout)]
+        self.assertEqual(actions, ["offer"])
+        offer = read_events(self.layout)[0]
+        self.assertEqual(offer["context_tokens"], 175000)
+        self.assertRegex(offer["cycle_id"], r"^[0-9a-f]{12}$")
+
+    def test_offer_and_later_request_share_the_cycle_id(self):
+        self.add_turn(175000)
+        self.assertIsNotNone(self.call_hook("stop"))
+        self.add_turn(212345)
+        self.assertIsNotNone(self.call_hook("stop"))
+        events = read_events(self.layout)
+        self.assertEqual([e["action"] for e in events], ["offer", "request"])
+        self.assertEqual(events[1]["cycle_id"], events[0]["cycle_id"])
+
+    def test_stop_past_hard_blocks(self):
+        self.add_turn(285000)
+        out = self.call_hook("stop")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("past the 280K hard limit", out["reason"])
+        self.assertIn("mode: hard", out["reason"])
+        self.assertEqual(out["systemMessage"], "🔋 pitstop · 285K → past the hard limit, pitstop now")
+        self.assertEqual(len(self.notes), 1)
+
+    def test_stop_past_hard_with_background_tasks_does_not_block(self):
+        self.add_turn(285000)
+        out = self.call_hook("stop", background_tasks=[{"id": "a"}])
+        self.assertNotIn("decision", out)
+        context = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("past the 280K hard limit", context)
+        self.assertIn("background tasks running: 1", context)
+
+    def test_stop_hook_active_never_blocks_twice(self):
+        self.add_turn(285000)
+        self.assertEqual(self.call_hook("stop")["decision"], "block")
+        self.assertIsNone(self.call_hook("stop", stop_hook_active=True))
+        self.assertEqual(len([e for e in read_events(self.layout) if e["action"] == "request"]), 1)
+
+    def test_stop_past_hard_is_silent_while_a_checkpoint_waits_for_the_restart(self):
+        self.add_turn(285000)
+        self.assertEqual(self.call_hook("stop")["decision"], "block")
+        self.pending(session_id="s1", context_tokens=285000)
+        self.add_turn(290000)
+        self.assertIsNone(self.call_hook("stop"))
+        self.add_turn(345000)
+        self.assertIsNone(self.call_hook("post-tool-batch"))
+
+    def test_claude_p_is_never_blocked(self):
+        self.add_turn(285000)
+        with mock.patch.dict("os.environ", {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}):
+            out = self.call_hook("stop")
+        self.assertNotIn("decision", out)
+        self.assertIn("past the 280K hard limit", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_request_logs_zone(self):
+        self.add_turn(212345)
+        self.call_hook("stop")
+        self.add_turn(285000)
+        self.call_hook("stop")
+        requests = [e for e in read_events(self.layout) if e["action"] == "request"]
+        self.assertEqual([(r["zone"], r["threshold"]) for r in requests], [("threshold", 200000), ("hard", 280000)])
 
     def test_invalid_config_shows_one_banner(self):
         self.layout.base.mkdir(parents=True, exist_ok=True)
@@ -114,6 +198,22 @@ class PostToolBatchHookTest(HookTestCase):
         self.assertIn("clean boundary", out["hookSpecificOutput"]["additionalContext"])
         self.assertIsNone(self.call_hook("stop"))
 
+    def test_batch_in_soft_zone_is_silent(self):
+        self.add_turn(175000)
+        self.assertIsNone(self.call_hook("post-tool-batch"))
+        self.assertEqual(read_events(self.layout), [])
+
+    def test_batch_past_hard_repeats_every_step(self):
+        self.add_turn(285000)
+        out = self.call_hook("post-tool-batch")
+        self.assertNotIn("decision", out)
+        self.assertIn("past the 280K hard limit", out["hookSpecificOutput"]["additionalContext"])
+        self.add_turn(300000)
+        self.assertIsNone(self.call_hook("post-tool-batch"))
+        self.add_turn(335000)
+        self.assertIsNotNone(self.call_hook("post-tool-batch"))
+        self.assertEqual([e.get("zone") for e in read_events(self.layout)], ["hard", "hard"])
+
     def test_unchanged_transcript_is_not_read_again(self):
         self.add_turn(100000)
         self.assertIsNone(self.call_hook("post-tool-batch"))
@@ -122,16 +222,6 @@ class PostToolBatchHookTest(HookTestCase):
             reader.assert_not_called()
         self.add_turn(212345)
         self.assertIsNotNone(self.call_hook("post-tool-batch"))
-
-
-class PendingMixin:
-    def pending(self, **overrides):
-        checkpoint = self.tmp / "cp.md"
-        checkpoint.write_text("# Checkpoint\nprossima azione: X", encoding="utf-8")
-        values = dict(checkpoint=str(checkpoint), session_id="s1", cwd="/work/repo", context_tokens=212000,
-                      created_at=NOW - 60, title="Titolo", plan=None)
-        values.update(overrides)
-        mark_pending(self.layout, PendingRecord(**values))
 
 
 class ResumeHookTest(PendingMixin, HookTestCase):
@@ -348,7 +438,7 @@ class FailOpenTest(HookTestCase):
     def test_notifier_failure_does_not_lose_the_request(self):
         def broken(title, message):
             raise RuntimeError("boom")
-        self.add_turn(300000)
+        self.add_turn(212345)
         self.assertIsNotNone(self.call_hook("stop", notifier=broken))
 
 
@@ -364,11 +454,12 @@ class CycleIdHookTest(PendingMixin, HookTestCase):
         self.add_turn(212345)
         with mock.patch.dict("os.environ", {"CLAUDE_CODE_ENTRYPOINT": "cli"}):
             self.assertIsNotNone(self.call_hook("stop"))
-        self.add_turn(262345)
+        self.add_turn(285000)
         self.assertIsNotNone(self.call_hook("stop"))
         requests = self.events("request")
         cycle = requests[0]["cycle_id"]
         self.assertRegex(cycle, r"^[0-9a-f]{12}$")
+        self.assertEqual([r["zone"] for r in requests], ["threshold", "hard"])
         self.assertEqual(requests[1]["cycle_id"], cycle)
         self.assertEqual(requests[0]["host"], "cli")
         projects = self.tmp / "projects"
@@ -392,6 +483,19 @@ class CycleIdHookTest(PendingMixin, HookTestCase):
         later = self.events("request")[-1]["cycle_id"]
         self.assertRegex(later, r"^[0-9a-f]{12}$")
         self.assertNotEqual(later, cycle)
+
+    def test_accepted_offer_and_its_checkpoint_share_the_cycle_id(self):
+        from pitstop.cli import main
+        import io
+        self.add_turn(175000)
+        self.assertIsNotNone(self.call_hook("stop"))
+        projects = self.tmp / "projects"
+        write_jsonl(projects / "-work-repo" / "s1.jsonl", [user_line(), assistant_line()])
+        code = main(["mark-pending", "--stdin", "--cwd", "/work/repo"], stdin=io.StringIO("# cp\n"),
+                    stdout=io.StringIO(), env={"CLAUDE_CODE_SESSION_ID": "s1"}, layout=self.layout,
+                    projects_dir=projects, now=NOW)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.events("pitstop_done")[0]["cycle_id"], self.events("offer")[0]["cycle_id"])
 
     def test_record_without_cycle_id_still_resumes(self):
         checkpoint = self.tmp / "cp.md"

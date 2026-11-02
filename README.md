@@ -15,7 +15,8 @@ per token, so a session at 400K tokens pays for 400K tokens on every turn, even 
 needed.
 
 pitstop waits until the context passes a threshold (200K tokens by default), then has Claude write a short
-checkpoint at the next clean point: the goal, the current state, the next action, the decisions and preferences,
+checkpoint at the next clean point (from 170K it already offers one when a turn ends at a natural boundary, and
+past 280K it requires one): the goal, the current state, the next action, the decisions and preferences,
 and the files to re-read. The session restarts from that checkpoint instead of carrying everything along.
 
 The chart above is an illustration, not a benchmark: a 146-turn session that grows by 4K tokens a turn. Its
@@ -25,7 +26,9 @@ files re-read after each resume. The saving in your sessions depends on how they
 
 ## What a pitstop looks like
 
-1. The context passes the threshold. pitstop asks Claude to stop at the next clean point.
+1. The context passes the threshold. pitstop asks Claude to stop at the next clean point. Before that, in the soft
+   zone, it offers a pitstop once at the end of a turn, taken only at a natural boundary. Past the hard limit it
+   asks at the end of every turn, and Claude skips only while subagents or background tasks are running.
 2. Claude writes the checkpoint and prints `🔋 pitstop · done at 226K → back on track with a clean context`.
 3. The session restarts:
    - **Terminal:** on a Claude Code that loads hooks modules, pitstop runs `/compact` when the turn ends and
@@ -90,13 +93,15 @@ a clone).
 
 ## Configuration
 
-`~/.claude/pitstop/config.json`. A missing file means these defaults:
+`config.json` in the pitstop folder (`~/.claude/pitstop/` by default, see [Data](#data)). A missing file means these defaults:
 
 ```json
 {
   "enabled": true,
   "notify": true,
+  "soft_threshold_tokens": 170000,
   "threshold_tokens": 200000,
+  "hard_threshold_tokens": 280000,
   "retrigger_step_tokens": 50000,
   "resume_window_minutes": 60,
   "metrics": false
@@ -105,8 +110,13 @@ a clone).
 
 | Key | Meaning |
 |---|---|
-| `threshold_tokens` | Context size that triggers a pitstop (50,000–900,000) |
-| `retrigger_step_tokens` | After a skipped pitstop, how many more tokens before asking again |
+| `soft_threshold_tokens` | Start of the soft zone: one offer at the end of a turn, taken only at a natural boundary (10,000–900,000) |
+| `threshold_tokens` | Context size that requests a pitstop, once per segment (50,000–900,000) |
+| `hard_threshold_tokens` | Past this size a pitstop is required: asked at the end of every turn (50,000–2,000,000) |
+| `retrigger_step_tokens` | Past the hard limit, during a long turn, how many more tokens before asking again |
+
+The limits must grow in this order: soft, threshold, hard. A file that sets only `threshold_tokens` gets the
+soft limit 30K below it (at least 50K) and the hard limit 80K above it.
 | `resume_window_minutes` | How long a checkpoint stays valid for an automatic resume (1–60) |
 | `metrics` | Run `pitstop report` in the background once a day, at session start |
 
@@ -114,9 +124,11 @@ An invalid file turns pitstop off and says why once, until the file changes.
 
 ## How it works
 
-- `Stop` and `PostToolBatch` hooks read the context size from the session transcript. Past the threshold they ask
-  Claude for a pitstop, once per segment. A context back under the threshold (a `/compact` outside pitstop) starts
-  a new segment.
+- `Stop` and `PostToolBatch` hooks read the context size from the session transcript. In the soft zone `Stop`
+  offers a pitstop once. Past the threshold they ask Claude for a pitstop, once per segment. Past the hard limit
+  `Stop` blocks the end of the turn until Claude does the pitstop, unless background tasks are running, a
+  checkpoint already waits for its restart, or the session runs under `claude -p`. A context
+  back under the soft limit (a `/compact` outside pitstop) starts a new segment.
 - The `pitstop` skill writes and registers the checkpoint in one call to the `bin/pitstop` CLI, then restarts the
   session. The CLI refuses a checkpoint that cites, under Re-read, a file that does not exist, so Claude fixes it
   before the restart.
@@ -138,7 +150,7 @@ An invalid file turns pitstop off and says why once, until the file changes.
 
 `/pitstop report` (a local Python script, no tokens) rebuilds each pitstop from the log: request, skip and its
 category, checkpoint, restart, resume, context before and after, model calls until the next pitstop, gaps. It
-prints a summary by plugin version and adds one row per finished pitstop to `~/.claude/pitstop/metrics.jsonl`,
+prints a summary by plugin version and adds one row per finished pitstop to `metrics.jsonl` in the pitstop folder,
 once per pitstop. The rows keep only numbers and categories, never conversation text, so they stay after
 checkpoints and transcripts are deleted. To find skips and calls, the report reads the local transcripts of every
 Claude profile on the machine (`$CLAUDE_CONFIG_DIR` and `~/.claude*/projects`).
@@ -148,7 +160,10 @@ once a day, when a session starts.
 
 ## Data
 
-Everything stays on your machine, in `~/.claude/pitstop/` (override with `PITSTOP_HOME`): `config.json`,
+Everything stays on your machine, in one folder per Claude account: `$CLAUDE_CONFIG_DIR/pitstop/` when you set
+`CLAUDE_CONFIG_DIR`, otherwise `~/.claude/pitstop/`. If `~/.claude/pitstop/` already holds data and the account
+folder does not exist yet, pitstop keeps using `~/.claude/pitstop/`; to separate an account you added later, set
+`PITSTOP_HOME` for it (it always wins). `/pitstop status` prints the folder in use. It holds `config.json`,
 `checkpoints/`, `pending/`, `state/`, `log.jsonl`, `gaps.jsonl` and, once you run the report, `metrics.jsonl`,
 `report-last-run.txt` and two lock files, `metrics.lock` and `report-last-run.lock`. The log and the metrics hold token counts, states and categories, not conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
 instruction. Checkpoints and session state files older than 30 days are deleted at the next pitstop.
@@ -170,7 +185,7 @@ claude plugin uninstall pitstop@pitstop
 claude plugin marketplace remove pitstop
 ```
 
-For a clone: `rm ~/.claude/skills/pitstop`. Delete `~/.claude/pitstop/` too if you do not need the checkpoints or
+For a clone: `rm ~/.claude/skills/pitstop`. Delete the pitstop folder (`/pitstop status` prints it) too if you do not need the checkpoints or
 the log.
 
 ## License

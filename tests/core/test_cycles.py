@@ -90,3 +90,38 @@ class BuildCyclesTest(unittest.TestCase):
     def test_cycles_come_in_order_of_their_first_event(self):
         events = [ev("request", T + 10, cycle="b"), ev("request", T + 20, cycle="a"), ev("gap", T + 30, cycle="b")]
         self.assertEqual([c.cycle_id for c in build_cycles(events, T + 40)], ["b", "a"])
+
+
+OFFER = ev("offer", T - 600, context_tokens=175000, host="cli")
+
+
+class ZoneCyclesTest(unittest.TestCase):
+    def one(self, events, now):
+        cycles = build_cycles(events, now)
+        self.assertEqual(len(cycles), 1)
+        return cycles[0]
+
+    def test_offer_then_done_is_resumed(self):
+        done = ev("pitstop_done", T - 500, context_tokens=176000, restart="clear", kind="code")
+        resume = ev("resume", T - 400, session_id="s2")
+        cycle = self.one([OFFER, done, resume], now=T - 400 + DAY + 1)
+        self.assertEqual((cycle.outcome, cycle.closed), ("resumed", True))
+        self.assertEqual((cycle.offers, cycle.requests, cycle.first_offer_ts), (1, 0, T - 600))
+        self.assertEqual(cycle.session, "s1")
+
+    def test_offer_only_is_declined_not_skipped(self):
+        self.assertEqual(self.one([OFFER], now=T).outcome, "open")
+        cycle = self.one([OFFER], now=T - 600 + DAY + 1)
+        self.assertEqual((cycle.outcome, cycle.closed), ("declined", True))
+        # an offer followed by a request nobody took is a skip, as before
+        self.assertEqual(self.one([OFFER, REQUEST], now=T + DAY + 1).outcome, "skipped")
+
+    def test_hard_requests_counted(self):
+        hard = ev("request", T + 30, context_tokens=285000, zone="hard")
+        cycle = self.one([ev("request", T, context_tokens=212000, zone="threshold"), hard], now=T + 40)
+        self.assertEqual((cycle.requests, cycle.hard_requests), (2, 1))
+
+    def test_an_offer_starts_the_cycle_for_next_start(self):
+        from pitstop.core.cycles import next_start
+        cycles = build_cycles([OFFER, ev("request", T, context_tokens=212000)], T + 10)
+        self.assertEqual(next_start(cycles, "s1", T - 700), T - 600)

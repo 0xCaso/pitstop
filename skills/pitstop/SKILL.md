@@ -40,11 +40,15 @@ A command that exits non-zero prints `🔋 pitstop · <reason>`: show that line 
 
 ## Automatic pitstop
 
-A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and the step before the next request.
+A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and when the next request comes.
 
 1. **When.** Mode `conversation`: now. Mode `superpowers`: finish the current step up to the boundary named in
    the message, then come back here before starting anything new.
-2. **Exceptions.** Skip the pitstop when any of these applies (its category in brackets):
+   - `mode: offer` (the soft zone, before the threshold): Pitstop only at a natural boundary (a task done, a commit made, an answer finished). Otherwise carry on and print nothing: an offer is not a request and needs no skip line.
+   - `mode: hard` (past the hard limit): No exceptions except [background-tasks]. Run the "Checkpoint procedure" now.
+     If subagents or background tasks are running, skip with category `background-tasks`; the request comes back.
+2. **Exceptions** (modes `conversation` and `superpowers`). Skip the pitstop when any of these applies (its
+   category in brackets):
    - a debugging session is half-way (discarded hypotheses and observed output live only in this context)
      [`debugging`];
    - you are fine-editing a long text you already read (you need the exact text) [`fine-editing`];
@@ -162,6 +166,7 @@ artifacts and never summarizes them. Text that exists only in the conversation i
   in word for word. If it is too long, save it to a support file next to the checkpoint (see the fallback in
   "Checkpoint procedure") and cite that file. Never replace it with a description. Write `—` only when there is
   none. With `--kind other` (research, writing, strategy) most of the state lives here: fill it first.
+- For --kind other the state lives in the chat: put the tables, lists, figures and sources the next action needs under "Chat-only text" word for word, and when they pass about 1K tokens save them to a support file and cite it.
 - Leave out secrets, tokens, passwords and personal data.
 - Write `—` under an empty section.
 

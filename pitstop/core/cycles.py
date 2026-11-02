@@ -15,9 +15,12 @@ class Cycle:
     host: Optional[str] = None
     session: Optional[str] = None  # the session that was asked for the pitstop (or made it)
     kind: Optional[str] = None
+    first_offer_ts: Optional[float] = None
+    offers: int = 0  # soft-zone offers (0.3+)
     first_request_ts: Optional[float] = None
     request_tokens: Optional[int] = None
     requests: int = 0
+    hard_requests: int = 0  # requests past the hard limit (0.3+)
     last_request_ts: Optional[float] = None
     done_ts: Optional[float] = None
     done_tokens: Optional[int] = None
@@ -42,10 +45,17 @@ def _apply(cycle: Cycle, event: Dict[str, Any]) -> None:
     ts = _number(event.get("ts"))
     if cycle.host is None and isinstance(event.get("host"), str):
         cycle.host = event["host"]
-    if cycle.session is None and action in ("request", "pitstop_done") and isinstance(event.get("session_id"), str):
+    if (cycle.session is None and action in ("offer", "request", "pitstop_done")
+            and isinstance(event.get("session_id"), str)):
         cycle.session = event["session_id"]
-    if action == "request":
+    if action == "offer":
+        cycle.offers += 1
+        if cycle.first_offer_ts is None:
+            cycle.first_offer_ts = ts
+    elif action == "request":
         cycle.requests += 1
+        if event.get("zone") == "hard":
+            cycle.hard_requests += 1
         if cycle.first_request_ts is None:
             cycle.first_request_ts = ts
             cycle.request_tokens = event.get("context_tokens")
@@ -72,8 +82,9 @@ def _apply(cycle: Cycle, event: Dict[str, Any]) -> None:
 
 
 def _start(cycle: Cycle) -> Optional[float]:
-    """When a cycle began: its first request, or its checkpoint for a pitstop nobody requested."""
-    return cycle.first_request_ts if cycle.first_request_ts is not None else cycle.done_ts
+    """When a cycle began: its first offer or request, or its checkpoint for a pitstop nobody offered or requested."""
+    asked = [ts for ts in (cycle.first_offer_ts, cycle.first_request_ts) if ts is not None]
+    return min(asked) if asked else cycle.done_ts
 
 
 def next_start(cycles: List[Cycle], session: Optional[str], after: float) -> Optional[float]:
@@ -99,6 +110,10 @@ def _settle(cycle: Cycle, cycles: List[Cycle], now: float) -> None:
         cycle.outcome = "unconsumed" if now - cycle.done_ts > DAY_SECONDS else "open"
     elif cycle.last_request_ts is not None and now - cycle.last_request_ts > DAY_SECONDS:
         cycle.outcome = "skipped"
+    elif (cycle.requests == 0 and cycle.first_offer_ts is not None
+          and now - cycle.first_offer_ts > DAY_SECONDS):
+        # Offered in the soft zone, never requested, no checkpoint: the offer was declined, not a skipped request.
+        cycle.outcome = "declined"
     else:
         cycle.outcome = "open"
     cycle.closed = cycle.outcome != "open"

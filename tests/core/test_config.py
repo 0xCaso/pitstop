@@ -20,6 +20,24 @@ class ParseConfigTest(unittest.TestCase):
         with self.assertRaises(ConfigError):
             parse_config({"metrics": "on"})
 
+    def test_defaults_three_limits(self):
+        config = Config()
+        self.assertEqual((config.soft_threshold_tokens, config.threshold_tokens, config.hard_threshold_tokens),
+                         (170000, 200000, 280000))
+
+    def test_order_enforced(self):
+        for raw in ({"soft_threshold_tokens": 200000}, {"hard_threshold_tokens": 200000}):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ConfigError) as caught:
+                    parse_config(raw)
+                self.assertIn("soft_threshold_tokens < threshold_tokens < hard_threshold_tokens", str(caught.exception))
+
+    def test_missing_limits_follow_threshold(self):
+        config = parse_config({"threshold_tokens": 120000})
+        self.assertEqual((config.soft_threshold_tokens, config.hard_threshold_tokens), (90000, 200000))
+        config = parse_config({"threshold_tokens": 60000})
+        self.assertEqual((config.soft_threshold_tokens, config.hard_threshold_tokens), (50000, 140000))
+
     def test_unknown_keys_are_ignored(self):
         self.assertEqual(parse_config({"future": 1}), Config())
 
@@ -80,6 +98,25 @@ class UpdateConfigTest(TempLayoutTestCase):
         update_config(self.layout, threshold_tokens=60000)
         config = update_config(self.layout, notify=False)
         self.assertEqual((config.threshold_tokens, config.notify), (60000, False))
+
+    def test_toggle_does_not_freeze_derived_limits(self):
+        self.layout.base.mkdir(parents=True)
+        self.layout.config.write_text('{"threshold_tokens": 120000}', encoding="utf-8")
+        update_config(self.layout, notify=False)
+        saved = json.loads(self.layout.config.read_text(encoding="utf-8"))
+        self.assertNotIn("soft_threshold_tokens", saved)
+        self.assertNotIn("hard_threshold_tokens", saved)
+        saved["threshold_tokens"] = 300000
+        self.layout.config.write_text(json.dumps(saved), encoding="utf-8")
+        config, error = load_config(self.layout)
+        self.assertIsNone(error)
+        self.assertEqual((config.soft_threshold_tokens, config.hard_threshold_tokens), (270000, 380000))
+
+    def test_explicit_limits_are_kept(self):
+        update_config(self.layout, soft_threshold_tokens=150000)
+        update_config(self.layout, notify=False)
+        saved = json.loads(self.layout.config.read_text(encoding="utf-8"))
+        self.assertEqual(saved["soft_threshold_tokens"], 150000)
 
     def test_refuses_to_overwrite_invalid_file(self):
         self.layout.base.mkdir(parents=True)

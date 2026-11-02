@@ -153,9 +153,10 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         restart = "auto"
     else:
         restart = "compact" if ctx.env.get(ENTRYPOINT_ENV, "").startswith("sdk") else "clear"
-    # The cycle the hook opened with its request; a pitstop nobody requested (/pitstop now) starts its own.
+    # The cycle the hook opened with its offer or request; a pitstop nobody asked for (/pitstop now) starts its own.
     state = load_state(ctx.layout, session)
-    cycle_id = state.cycle_id if state.requested_at_tokens is not None and state.cycle_id else new_cycle_id()
+    asked = state.requested_at_tokens is not None or state.offered_at_tokens is not None
+    cycle_id = state.cycle_id if asked and state.cycle_id else new_cycle_id()
     record = PendingRecord(
         checkpoint=str(checkpoint.resolve()),
         session_id=session,
@@ -217,8 +218,9 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
         ctx.say("🔋 pitstop: on")
     ctx.say("notifications: %s" % ("on" if config.notify else "off"))
     ctx.say("metrics: %s" % ("on" if config.metrics else "off"))
-    ctx.say("current context: %s · threshold %s" % (_current_context(args, ctx, session),
-                                                 messages.k(config.threshold_tokens)))
+    ctx.say("current context: %s · soft %s · threshold %s · hard %s" % (
+        _current_context(args, ctx, session), messages.k(config.soft_threshold_tokens),
+        messages.k(config.threshold_tokens), messages.k(config.hard_threshold_tokens)))
     events = read_events(ctx.layout)
     done = sum(1 for e in events if e.get("action") == "pitstop_done")
     gaps = sum(1 for e in events if e.get("action") == "gap")
@@ -228,6 +230,7 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
     if bases:
         ctx.say("real resume size: last %s · median %s" % (messages.k(bases[-1]),
                                                              messages.k(int(statistics.median(bases)))))
+    ctx.say("folder: %s" % ctx.layout.base)
 
 
 class _Transcripts:
