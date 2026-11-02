@@ -93,7 +93,7 @@ a clone).
 
 ## Configuration
 
-`~/.claude/pitstop/config.json`. A missing file means these defaults:
+`config.json` in the pitstop folder (`~/.claude/pitstop/` by default, see [Data](#data)). A missing file means these defaults:
 
 ```json
 {
@@ -149,7 +149,7 @@ An invalid file turns pitstop off and says why once, until the file changes.
 
 `/pitstop report` (a local Python script, no tokens) rebuilds each pitstop from the log: request, skip and its
 category, checkpoint, restart, resume, context before and after, model calls until the next pitstop, gaps. It
-prints a summary by plugin version and adds one row per finished pitstop to `~/.claude/pitstop/metrics.jsonl`,
+prints a summary by plugin version and adds one row per finished pitstop to `metrics.jsonl` in the pitstop folder,
 once per pitstop. The rows keep only numbers and categories, never conversation text, so they stay after
 checkpoints and transcripts are deleted. To find skips and calls, the report reads the local transcripts of every
 Claude profile on the machine (`$CLAUDE_CONFIG_DIR` and `~/.claude*/projects`).
@@ -159,7 +159,10 @@ once a day, when a session starts.
 
 ## Data
 
-Everything stays on your machine, in `~/.claude/pitstop/` (override with `PITSTOP_HOME`): `config.json`,
+Everything stays on your machine, in one folder per Claude account: `$CLAUDE_CONFIG_DIR/pitstop/` when you set
+`CLAUDE_CONFIG_DIR`, otherwise `~/.claude/pitstop/`. If `~/.claude/pitstop/` already holds data and the account
+folder does not exist yet, pitstop keeps using `~/.claude/pitstop/`; to separate an account you added later, set
+`PITSTOP_HOME` for it (it always wins). `/pitstop status` prints the folder in use. It holds `config.json`,
 `checkpoints/`, `pending/`, `state/`, `log.jsonl`, `gaps.jsonl` and, once you run the report, `metrics.jsonl`,
 `report-last-run.txt` and two lock files, `metrics.lock` and `report-last-run.lock`. The log and the metrics hold token counts, states and categories, not conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
 instruction. Checkpoints and session state files older than 30 days are deleted at the next pitstop.
@@ -181,7 +184,7 @@ claude plugin uninstall pitstop@pitstop
 claude plugin marketplace remove pitstop
 ```
 
-For a clone: `rm ~/.claude/skills/pitstop`. Delete `~/.claude/pitstop/` too if you do not need the checkpoints or
+For a clone: `rm ~/.claude/skills/pitstop`. Delete the pitstop folder (`/pitstop status` prints it) too if you do not need the checkpoints or
 the log.
 
 ## License
