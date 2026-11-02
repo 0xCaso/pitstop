@@ -63,3 +63,18 @@ class MetricsTest(TempLayoutTestCase):
         self.assertNotIn("reduction", second)
         self.assertEqual(append_rows(self.layout, [first, second]), 2)
         self.assertEqual(append_rows(self.layout, import_audit(audit)), 0)
+
+
+class SummaryTest(TempLayoutTestCase):
+    def test_summary_counts_accepted_offers_and_hard_cycles(self):
+        from pitstop.core.metrics import summary
+        rows = [row("c1", v="0.3.0", offers=1, requests=0, hard_requests=0, done_ts=5.0),
+                row("c2", v="0.3.0", offers=1, requests=1, hard_requests=0, done_ts=6.0),
+                row("c3", v="0.3.0", offers=1, requests=0, hard_requests=0, outcome="declined"),
+                row("c4", v="0.3.0", offers=0, requests=2, hard_requests=1, done_ts=7.0),
+                row("c5", v="0.2.1", requests=1, done_ts=8.0),
+                row("c6", v="0.2.1", offers=0, requests=1, hard_requests=0, done_ts=9.0)]
+        append_rows(self.layout, rows)
+        lines = summary(load_rows(self.layout))
+        self.assertIn("  zones: offers accepted 1/3 · hard 1", lines)
+        self.assertEqual(sum("zones:" in line for line in lines), 1)  # 0.2.1 had no offers and no hard limit

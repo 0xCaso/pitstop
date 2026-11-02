@@ -215,13 +215,19 @@ class StatusAndGapTest(CliTestCase):
             "🔋 pitstop: on",
             "notifications: on",
             "metrics: off",
-            "current context: 212K · threshold 200K",
+            "current context: 212K · soft 170K · threshold 200K · hard 280K",
             "pitstops: 1 · real resumes: 2 · gaps: 1",
             "real resume size: last 90K · median 80K",
+            "folder: %s" % self.layout.base,
         ])
         gaps = [json.loads(line) for line in self.layout.gaps.read_text(encoding="utf-8").splitlines()]
         self.assertEqual((gaps[0]["session_id"], gaps[0]["text"]), ("s1", "missing the ledger"))
         self.assertNotIn("ledger", self.layout.log.read_text(encoding="utf-8"))
+
+    def test_status_shows_folder(self):
+        code, out = self.cli("status")
+        self.assertEqual(code, 0)
+        self.assertIn("folder: %s" % self.layout.base, out.splitlines())
 
     def test_status_reports_exclusion_and_missing_context(self):
         self.cli("off-here")

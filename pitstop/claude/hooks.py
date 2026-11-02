@@ -12,7 +12,7 @@ from pitstop.claude.notify import notify
 from pitstop.claude.transcript import TranscriptSchemaError, read_context_tokens
 from pitstop.core.build import new_cycle_id
 from pitstop.core.config import Config, load_config, should_show_config_notice
-from pitstop.core.decide import REQUEST, Event, decide, segment_start
+from pitstop.core.decide import HARD, OFFER, REQUEST, Event, decide, segment_start
 from pitstop.core.fsutil import LockTimeout, atomic_write_text, file_lock
 from pitstop.core.log import log_event
 from pitstop.core.paths import Layout
@@ -102,24 +102,66 @@ def _context_tokens(layout: Layout, state: SessionState, log_name: str, transcri
     return tokens
 
 
-def _open_request(state: SessionState, tokens: int) -> str:
-    """Record the request in the session state; the first request of a segment starts a new cycle."""
-    if state.requested_at_tokens is None or state.cycle_id is None:
+def _open_cycle(state: SessionState) -> str:
+    """The first offer or request of a segment starts a new cycle; later ones in the segment share it."""
+    if state.cycle_id is None or (state.requested_at_tokens is None and state.offered_at_tokens is None):
         state.cycle_id = new_cycle_id()
-    state.requested_at_tokens = tokens
     return state.cycle_id
 
 
+def _open_request(state: SessionState, tokens: int) -> str:
+    """Record the request (threshold or hard) in the session state."""
+    cycle_id = _open_cycle(state)
+    state.requested_at_tokens = tokens
+    return cycle_id
+
+
+def _open_offer(state: SessionState, tokens: int) -> str:
+    """Record the soft-zone offer in the session state: one per segment."""
+    cycle_id = _open_cycle(state)
+    state.offered_at_tokens = tokens
+    return cycle_id
+
+
+def _checkpoint_waiting(layout: Layout, session_id: str, now: float, config: Config) -> bool:
+    """The session already registered a checkpoint and waits for its restart (the user has not run /clear yet):
+    past the hard limit, asking again would only make Claude write the same checkpoint twice."""
+    return has_session_pending(layout, session_id, now, config.resume_window_minutes)
+
+
+def _offer(inp: HookInput, layout: Layout, config: Config, tokens: int, cycle_id: str) -> str:
+    """Soft zone: a quiet offer at the end of a turn. No banner and no notification: the user sees something only
+    if Claude takes it."""
+    log_event(layout, "stop", "offer", session_id=inp.session_id, context_tokens=tokens,
+              threshold=config.soft_threshold_tokens, cycle_id=cycle_id, host=host())
+    context = messages.offer_context(tokens, config.soft_threshold_tokens, config.threshold_tokens, inp.cwd,
+                                     str(CLI_PATH), str(SKILL_PATH), inp.background_tasks)
+    return build_output("Stop", additional_context=context)
+
+
 def _request(inp: HookInput, layout: Layout, notifier: Notifier, config: Config, tokens: int, log_name: str,
-             background_tasks: Optional[int], cycle_id: str) -> str:
+             background_tasks: Optional[int], cycle_id: str, hard: bool = False) -> str:
     output_event, build_context = _REQUESTS[log_name]
-    log_event(layout, log_name, "request", session_id=inp.session_id, context_tokens=tokens,
-              threshold=config.threshold_tokens, cycle_id=cycle_id, host=host())
+    limit = config.hard_threshold_tokens if hard else config.threshold_tokens
+    log_event(layout, log_name, "request", session_id=inp.session_id, context_tokens=tokens, threshold=limit,
+              zone="hard" if hard else "threshold", cycle_id=cycle_id, host=host())
     if config.notify:
         _safe_notify(notifier, messages.notify_triggered(tokens))
-    context = build_context(tokens=tokens, threshold=config.threshold_tokens, step=config.retrigger_step_tokens,
-                            cwd=inp.cwd, cli=str(CLI_PATH), skill=str(SKILL_PATH), background_tasks=background_tasks)
-    return build_output(output_event, system_message=messages.banner_triggered(tokens), additional_context=context)
+    if not hard:
+        context = build_context(tokens=tokens, threshold=config.threshold_tokens, step=config.retrigger_step_tokens,
+                                cwd=inp.cwd, cli=str(CLI_PATH), skill=str(SKILL_PATH),
+                                background_tasks=background_tasks, hard=config.hard_threshold_tokens)
+        return build_output(output_event, system_message=messages.banner_triggered(tokens),
+                            additional_context=context)
+    context = messages.hard_request_context(tokens, config.hard_threshold_tokens, config.retrigger_step_tokens,
+                                            inp.cwd, str(CLI_PATH), str(SKILL_PATH), background_tasks)
+    banner = messages.banner_hard(tokens)
+    if output_event == "Stop" and background_tasks == 0 and host() != "sdk-cli":
+        # (`claude -p` is left alone: a block would replace its answer with the pitstop.)
+        # Past the hard limit, with nothing running: Claude does not stop, it does the pitstop. Claude Code sends
+        # the next Stop with stop_hook_active, and decide() never blocks that one.
+        return build_output(output_event, system_message=banner, block_reason=context)
+    return build_output(output_event, system_message=banner, additional_context=context)
 
 
 def _maybe_log_resume_base(layout: Layout, state: SessionState, log_name: str, session_id: str,
@@ -147,10 +189,19 @@ def _handle_stop(inp: HookInput, layout: Layout, notifier: Notifier, now: float)
         _maybe_log_resume_base(layout, state, "stop", inp.session_id, tokens)
         segment_start(config, state, tokens)
         event = Event("stop", tokens, stop_hook_active=inp.stop_hook_active)
-        if decide(config, state, event).action != REQUEST:
+        action = decide(config, state, event).action
+        if action == HARD and _checkpoint_waiting(layout, inp.session_id, now, config):
             return None
-        cycle_id = _open_request(state, tokens)
-    return _request(inp, layout, notifier, config, tokens, "stop", inp.background_tasks, cycle_id)
+        if action == OFFER:
+            cycle_id = _open_offer(state, tokens)
+        elif action in (REQUEST, HARD):
+            cycle_id = _open_request(state, tokens)
+        else:
+            return None
+    if action == OFFER:
+        return _offer(inp, layout, config, tokens, cycle_id)
+    return _request(inp, layout, notifier, config, tokens, "stop", inp.background_tasks, cycle_id,
+                    hard=action == HARD)
 
 
 def _handle_post_tool_batch(inp: HookInput, layout: Layout, notifier: Notifier, now: float) -> Optional[str]:
@@ -170,10 +221,13 @@ def _handle_post_tool_batch(inp: HookInput, layout: Layout, notifier: Notifier, 
         tokens = state.last_context_tokens
         _maybe_log_resume_base(layout, state, "post_tool_batch", inp.session_id, tokens)
         segment_start(config, state, tokens)
-        if decide(config, state, Event("post_tool_batch", tokens)).action != REQUEST:
+        action = decide(config, state, Event("post_tool_batch", tokens)).action
+        if action == HARD and _checkpoint_waiting(layout, inp.session_id, now, config):
             return None
+        if action not in (REQUEST, HARD):
+            return None  # OFFER is Stop-only: decide() never returns it here
         cycle_id = _open_request(state, tokens)
-    return _request(inp, layout, notifier, config, tokens, "post_tool_batch", None, cycle_id)
+    return _request(inp, layout, notifier, config, tokens, "post_tool_batch", None, cycle_id, hard=action == HARD)
 
 
 def _is_fresh_session(transcript_path: str) -> bool:
@@ -291,6 +345,7 @@ def _resume(inp: HookInput, layout: Layout, notifier: Notifier, config: Config, 
     try:
         with locked_state(layout, inp.session_id) as state:
             state.requested_at_tokens = None
+            state.offered_at_tokens = None
             state.awaiting_resume_base = True
             state.last_transcript_size = -1
             state.last_context_tokens = None

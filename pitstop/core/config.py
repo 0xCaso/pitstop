@@ -15,6 +15,8 @@ class Config:
     retrigger_step_tokens: int = 50000
     resume_window_minutes: int = 60
     metrics: bool = False  # the daily background report and metrics.jsonl
+    soft_threshold_tokens: int = 170000  # from here to the threshold: an offer at the end of a turn
+    hard_threshold_tokens: int = 280000  # from here on: a pitstop is required
 
 
 class ConfigError(Exception):
@@ -26,7 +28,16 @@ _INT_RANGES = {
     "threshold_tokens": (50000, 900000),
     "retrigger_step_tokens": (10000, None),
     "resume_window_minutes": (1, 60),
+    "soft_threshold_tokens": (10000, 900000),
+    "hard_threshold_tokens": (50000, 2000000),
 }
+_ORDER = "soft_threshold_tokens < threshold_tokens < hard_threshold_tokens"
+
+
+def _derived_soft(threshold: int) -> int:
+    """Default soft limit for a config that sets only the threshold: 30K below it, at least 50K."""
+    soft = max(50000, threshold - 30000)
+    return soft if soft < threshold else threshold * 3 // 4
 
 
 def parse_config(raw: Any) -> Config:
@@ -48,6 +59,12 @@ def parse_config(raw: Any) -> Config:
             limit = "%d–%d" % (low, high) if high is not None else "≥ %d" % low
             raise ConfigError("%s out of range (%s)" % (key, limit))
         values[key] = value
+    if "soft_threshold_tokens" not in raw:
+        values["soft_threshold_tokens"] = _derived_soft(values["threshold_tokens"])
+    if "hard_threshold_tokens" not in raw:
+        values["hard_threshold_tokens"] = values["threshold_tokens"] + 80000
+    if not values["soft_threshold_tokens"] < values["threshold_tokens"] < values["hard_threshold_tokens"]:
+        raise ConfigError("limits out of order (%s)" % _ORDER)
     return Config(**values)
 
 
@@ -79,7 +96,11 @@ def update_config(layout: Layout, **changes: Any) -> Config:
         raise ConfigError("config.json must contain a JSON object: fix or delete it")
     raw.update(changes)
     config = parse_config(raw)
-    atomic_write_text(layout.config, json.dumps(asdict(config), indent=2) + "\n")
+    # Soft and hard limits the file does not set stay derived from the threshold: written out, they would freeze
+    # and a later threshold edit could put the three limits out of order.
+    saved = {key: value for key, value in asdict(config).items()
+             if key in raw or key not in ("soft_threshold_tokens", "hard_threshold_tokens")}
+    atomic_write_text(layout.config, json.dumps(saved, indent=2) + "\n")
     return config
 
 
