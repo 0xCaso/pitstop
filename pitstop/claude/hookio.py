@@ -58,10 +58,14 @@ def parse_hook_input(raw: str) -> HookInput:
 
 def build_output(event_name: str, system_message: Optional[str] = None, additional_context: Optional[str] = None,
                  initial_user_message: Optional[str] = None, session_title: Optional[str] = None,
-                 deny_reason: Optional[str] = None) -> str:
+                 deny_reason: Optional[str] = None, block_reason: Optional[str] = None) -> str:
     output: Dict[str, Any] = {}
     if system_message:
         output["systemMessage"] = system_message
+    if block_reason:
+        # Stop: Claude does not stop, it gets the reason as its next instruction.
+        output["decision"] = "block"
+        output["reason"] = block_reason
     specific: Dict[str, Any] = {"hookEventName": event_name}
     if additional_context:
         specific["additionalContext"] = additional_context
