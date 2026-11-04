@@ -11,7 +11,8 @@ async function isSdkHost($: Engine): Promise<boolean> {
   // SDK hosts (T3 Code) restart through the skill's own queued /compact. `claude -p` (sdk-cli) has no
   // thread to queue on, so it restarts here like the terminal.
   const entrypoint = (await $.env.get('CLAUDE_CODE_ENTRYPOINT')) ?? ''
-  return entrypoint.startsWith('sdk') && entrypoint !== 'sdk-cli'
+  // T3 Code runs through the SDK but sets its own name as the entrypoint.
+  return (entrypoint.startsWith('sdk') && entrypoint !== 'sdk-cli') || entrypoint === 't3-code'
 }
 
 async function pitstopHome($: Engine): Promise<string> {
