@@ -83,6 +83,18 @@ test('does nothing in an SDK host, where the skill queues its own /compact', asy
   expect(w.calls).toEqual([])
 })
 
+test('does nothing in T3 Code, whose entrypoint is not sdk-*', async ($, on) => {
+  const w: World = {
+    files: { [`${PENDING}/1-a.json`]: record('s1') },
+    env: { CLAUDE_CODE_ENTRYPOINT: 't3-code' },
+    calls: [],
+  }
+  const clock = world(on, w)
+  await $.turn.complete(turn)
+  await clock.advance(1)
+  expect(w.calls).toEqual([])
+})
+
 test('restarts under claude -p, which has no thread to queue on', async ($, on) => {
   const w: World = {
     files: { [`${PENDING}/1-a.json`]: record('s1') },

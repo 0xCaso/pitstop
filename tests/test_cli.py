@@ -135,7 +135,8 @@ class MarkPendingTest(CliTestCase):
     def test_restart_mode_follows_the_entrypoint(self):
         checkpoint = self.tmp / "cp.md"
         checkpoint.write_text("# Checkpoint", encoding="utf-8")
-        for entrypoint, mode in (("sdk-ts", "compact"), ("sdk-py", "compact"), ("cli", "clear"), (None, "clear")):
+        for entrypoint, mode in (("sdk-ts", "compact"), ("sdk-py", "compact"), ("t3-code", "compact"), ("cli", "clear"),
+                                  (None, "clear")):
             with self.subTest(entrypoint=entrypoint):
                 env = dict(SESSION_ENV)
                 if entrypoint is not None:
@@ -148,7 +149,8 @@ class MarkPendingTest(CliTestCase):
     def test_restart_is_automatic_where_the_hooks_module_is_loaded(self):
         checkpoint = self.tmp / "cp.md"
         checkpoint.write_text("# Checkpoint", encoding="utf-8")
-        for entrypoint, mode in (("cli", "auto"), (None, "auto"), ("sdk-cli", "auto")):
+        # t3-code: an SDK host queues its own /compact even if the flag leaked into its environment.
+        for entrypoint, mode in (("cli", "auto"), (None, "auto"), ("sdk-cli", "auto"), ("t3-code", "compact")):
             with self.subTest(entrypoint=entrypoint):
                 env = dict(SESSION_ENV, PITSTOP_AUTO_RESTART="1")
                 if entrypoint is not None:
