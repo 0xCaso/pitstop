@@ -35,6 +35,12 @@ SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 ENTRYPOINT_ENV = "CLAUDE_CODE_ENTRYPOINT"
 # Set by hooks/register.ts where it will restart the session itself (terminal and `claude -p`, not SDK hosts).
 AUTO_RESTART_ENV = "PITSTOP_AUTO_RESTART"
+# T3 Code runs Claude Code through the SDK but names itself in the entrypoint instead of "sdk-*".
+SDK_HOST_ENTRYPOINTS = ("t3-code",)
+
+
+def is_sdk_host(entrypoint: str) -> bool:
+    return (entrypoint.startswith("sdk") and entrypoint != "sdk-cli") or entrypoint in SDK_HOST_ENTRYPOINTS
 
 
 class CliError(Exception):
@@ -149,10 +155,13 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
     if checkpoint is None:
         checkpoint = write_checkpoint(ctx.layout, session, text, ctx.now)
     # SDK hosts (T3 Code) have no /clear: there the session compacts and resumes in place.
-    if ctx.env.get(AUTO_RESTART_ENV) == "1":
+    # The SDK check wins over the hooks module's flag: an SDK host must queue its own /compact.
+    if is_sdk_host(ctx.env.get(ENTRYPOINT_ENV, "")):
+        restart = "compact"
+    elif ctx.env.get(AUTO_RESTART_ENV) == "1":
         restart = "auto"
     else:
-        restart = "compact" if ctx.env.get(ENTRYPOINT_ENV, "").startswith("sdk") else "clear"
+        restart = "clear"
     # The cycle the hook opened with its offer or request; a pitstop nobody asked for (/pitstop now) starts its own.
     state = load_state(ctx.layout, session)
     asked = state.requested_at_tokens is not None or state.offered_at_tokens is not None
