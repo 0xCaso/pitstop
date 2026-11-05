@@ -239,9 +239,22 @@ def _is_fresh_session(transcript_path: str) -> bool:
         return True
 
 
+def _is_harness_notification(prompt: Optional[str]) -> bool:
+    """A prompt the harness sends on its own, not the user: e.g. a background task's notification, which an SDK
+    host (T3 Code) delivers as a UserPromptSubmit: `<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]…`
+    followed by `<task-notification>…</task-notification>`."""
+    text = (prompt or "").strip()
+    if text.startswith("<task-notification>"):
+        return True
+    if text.startswith("<system-reminder>"):
+        text = text[len("<system-reminder>"):].lstrip()
+        return text.startswith("[SYSTEM NOTIFICATION") or "<task-notification>" in text
+    return False
+
+
 def _handle_user_prompt_submit(inp: HookInput, layout: Layout, notifier: Notifier, now: float) -> Optional[str]:
-    if not has_pending(layout):
-        return None
+    if not has_pending(layout) or _is_harness_notification(inp.prompt):
+        return None  # a notification neither resumes nor shows the user went on
     if not _is_fresh_session(inp.transcript_path):
         _drop_unused_in_place_record(inp, layout)
         return None
@@ -268,7 +281,7 @@ def _handle_user_prompt_submit(inp: HookInput, layout: Layout, notifier: Notifie
 def _drop_unused_in_place_record(inp: HookInput, layout: Layout) -> None:
     """A user prompt in a session that still holds its /compact checkpoint: the restart did not happen and the
     session goes on, so the checkpoint is stale. Slash commands (the /compact itself), pitstop's own resume
-    message and an input without a prompt leave it alone."""
+    message and an input without a prompt leave it alone; harness notifications never get here."""
     prompt = (inp.prompt or "").strip()
     if not prompt or prompt.startswith("/") or prompt == messages.COMPACT_SUMMARY:
         return

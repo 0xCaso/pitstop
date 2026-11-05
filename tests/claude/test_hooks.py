@@ -11,6 +11,13 @@ from pitstop.core.state import locked_state
 from pitstop.core.store import EXPIRED_NOTICE_HORIZON_SECONDS, PendingRecord, mark_pending
 from tests.helpers import NOW, TempLayoutTestCase, assistant_line, user_line, write_jsonl
 
+# A background task's notification, delivered by the harness as a UserPromptSubmit (seen in T3 Code).
+NOTIFICATION = (
+    "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT] A background task you started has finished.\n"
+    "</system-reminder>\n<task-notification>\n<task-id>bq7x2m</task-id>\n<status>killed</status>\n"
+    "<summary>Background command \"npm run dev\" was stopped</summary>\n</task-notification>"
+)
+
 EVENT_NAMES = {"stop": "Stop", "post-tool-batch": "PostToolBatch", "user-prompt-submit": "UserPromptSubmit",
                "session-start": "SessionStart", "pre-tool-use": "PreToolUse"}
 
@@ -497,6 +504,14 @@ class CycleIdHookTest(PendingMixin, HookTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.events("pitstop_done")[0]["cycle_id"], self.events("offer")[0]["cycle_id"])
 
+    def test_a_harness_notification_does_not_take_a_fresh_session_checkpoint(self):
+        self.pending(session_id="s0")
+        fresh = write_jsonl(self.tmp / "s2.jsonl", [user_line()])
+        self.assertIsNone(self.call_hook("user-prompt-submit", session_id="s2", transcript_path=str(fresh),
+                                         prompt=NOTIFICATION))
+        self.assertEqual(read_events(self.layout), [])
+        self.assertIsNotNone(self.call_hook("user-prompt-submit", session_id="s2", transcript_path=str(fresh)))
+
     def test_record_without_cycle_id_still_resumes(self):
         checkpoint = self.tmp / "cp.md"
         checkpoint.write_text("# Checkpoint", encoding="utf-8")
@@ -592,6 +607,19 @@ class InPlaceRecordHookTest(PendingMixin, HookTestCase):
             with self.subTest(prompt=prompt):
                 self.assertIsNone(self.call_hook("user-prompt-submit", prompt=prompt))
         self.assertIsNotNone(self.call_hook("session-start", source="compact"))
+
+    def test_a_harness_notification_keeps_it(self):
+        self.pending(restart="compact")
+        for prompt in (NOTIFICATION, "<task-notification>\n<status>completed</status>\n</task-notification>"):
+            with self.subTest(prompt=prompt[:30]):
+                self.assertIsNone(self.call_hook("user-prompt-submit", prompt=prompt))
+        self.assertEqual(read_events(self.layout), [])
+        self.assertIsNotNone(self.call_hook("session-start", source="compact"))
+
+    def test_a_prompt_that_only_mentions_a_notification_drops_it(self):
+        self.pending(restart="compact")
+        self.assertIsNone(self.call_hook("user-prompt-submit", prompt="why did [SYSTEM NOTIFICATION] show up?"))
+        self.assertEqual([e["action"] for e in read_events(self.layout)], ["pending_dropped"])
 
     def test_a_clear_record_is_left_for_the_fresh_session(self):
         self.pending(restart="clear")
