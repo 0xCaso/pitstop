@@ -89,7 +89,7 @@ class ZonesPluginTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
 
-    def test_versions_are_0_3_0(self):
+    def test_versions_are_0_3_1(self):
         for path in (REPO_ROOT / "package.json", REPO_ROOT / ".claude-plugin" / "plugin.json"):
             with self.subTest(path=path.name):
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.3.0")
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.3.1")
