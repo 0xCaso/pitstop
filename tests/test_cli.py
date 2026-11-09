@@ -7,6 +7,7 @@ from pitstop.core.config import load_config
 from pitstop.core.fsutil import append_line
 from pitstop.core.log import log_event, read_events
 from pitstop.core.metrics import load_rows
+from pitstop.core.reviewlog import append_review, last_review_ts
 from pitstop.core.state import load_state
 from pitstop.core.store import consume_pending
 from tests.helpers import NOW, TempLayoutTestCase, assistant_line, user_line, write_jsonl
@@ -402,9 +403,43 @@ class ReviewBundleTest(CliTestCase):
 
     def test_review_bundle_default_n_from_config(self):
         self.layout.config.write_text(json.dumps({"review_sample": 1}), encoding="utf-8")
+        append_review(self.layout, NOW, "/old", 3, 0, 0)
         code, lines, folder = self.bundle()
         self.assertEqual(code, 0)
         self.assertEqual([p.name for p in folder.iterdir()], ["c.md"])
+
+    def test_review_bundle_reads_all_resumed_since_last_review(self):
+        self.layout.config.write_text(json.dumps({"review_sample": 1}), encoding="utf-8")
+        append_review(self.layout, NOW - 20000, "/old", 3, 0, 0)  # after a's resume, before b's and c's
+        code, lines, folder = self.bundle()
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["b.md", "c.md"])
+
+    def test_review_bundle_n_clamped(self):
+        code, lines, folder = self.bundle("--n", "0")
+        self.assertEqual([p.name for p in folder.iterdir()], ["c.md"])
+
+    def test_review_bundle_prints_since_last_review(self):
+        code, lines, folder = self.bundle("--n", "1")
+        self.assertEqual(lines[lines.index("bundle: %s" % folder) + 1],
+                         "last review: none · 0 closed cycles · 0 gaps since")
+        append_review(self.layout, NOW - 86400 * 3, "/old", 3, 0, 0)
+        code, lines, folder = self.bundle("--n", "1")
+        since = lines[lines.index("bundle: %s" % folder) + 1]
+        self.assertTrue(since.startswith("last review: 20"), since)
+        self.assertTrue(since.endswith(" · 0 closed cycles · 0 gaps since"), since)
+
+    def test_review_done_logs_and_prints_final_line(self):
+        self.assertEqual(self.cli("review-done", "--bundle", "/x/b", "--cycles", "5", "--approved", "3",
+                                  "--rejected", "0"),
+                         (0, "🔋 **pitstop** · review: 5 cycles · 3 approved · 0 rejected\n"))
+        self.assertEqual(last_review_ts(self.layout), NOW)
+        self.assertEqual(len(self.layout.reviews_log.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_review_done_rejects_negative_counts(self):
+        code, out = self.cli("review-done", "--bundle", "/x/b", "--cycles", "5", "--approved", "-1",
+                             "--rejected", "0")
+        self.assertNotEqual(code, 0)
+        self.assertFalse(self.layout.reviews_log.exists())
 
 
 class ConfigCommandTest(CliTestCase):

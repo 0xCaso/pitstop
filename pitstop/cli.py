@@ -29,7 +29,9 @@ from pitstop.core.fsutil import append_line, atomic_write_text
 from pitstop.core.log import log_event, read_events
 from pitstop.core.metrics import append_rows, cycle_row, import_audit, load_rows, summary
 from pitstop.core.paths import Layout, pitstop_home
-from pitstop.core.review import pick_sample
+from pitstop.core.review import (MAX_SAMPLE, count_resumed_since, pick_sample, sample_size,
+                                 since_last_review)
+from pitstop.core.reviewlog import append_review, last_review_ts
 from pitstop.core.state import load_state, locked_state
 from pitstop.core.store import PendingRecord, mark_pending, new_checkpoint_path, prune_old_files, write_checkpoint
 
@@ -347,19 +349,36 @@ def _review_file(cycle: Cycle, cycles: List[Cycle], transcripts: _Transcripts) -
 def cmd_review_bundle(args: argparse.Namespace, ctx: Ctx) -> None:
     cmd_report(argparse.Namespace(quiet=False, import_audit=None), ctx)
     config, _ = load_config(ctx.layout)
-    cycles = build_cycles(read_events(ctx.layout), ctx.now)
-    sample = pick_sample(cycles, args.n if args.n is not None else config.review_sample)
+    events = read_events(ctx.layout)
+    cycles = build_cycles(events, ctx.now)
+    last = last_review_ts(ctx.layout)
+    if args.n is not None:
+        n = min(MAX_SAMPLE, max(1, args.n))
+    else:
+        n = sample_size(config.review_sample, count_resumed_since(cycles, last))
+    sample = pick_sample(cycles, n)
     if not sample:
         raise CliError("no resumed cycles to review")
     folder = ctx.layout.reviews_dir / time.strftime("%Y%m%d-%H%M%S", time.localtime(ctx.now))
     transcripts = _Transcripts(ctx.report_dirs)
     ctx.say("bundle: %s" % folder)
+    closed, gaps = since_last_review(cycles, events, last)
+    ctx.say("last review: %s · %d closed cycles · %d gaps since" % (
+        "none" if last is None else time.strftime("%Y-%m-%d", time.localtime(last)), closed, gaps))
     for cycle in sample:
         path = folder / ("%s.md" % cycle.cycle_id)
         atomic_write_text(path, _review_file(cycle, cycles, transcripts))
         ctx.say("cycle %s · v %s · %s · %s → %s · %s" % (cycle.cycle_id, cycle.v, _number_or_dash(cycle.host),
                                                        _k_or_dash(cycle.done_tokens), _k_or_dash(cycle.resume_base),
                                                        path))
+
+
+def cmd_review_done(args: argparse.Namespace, ctx: Ctx) -> None:
+    counts = (args.cycles, args.approved, args.rejected)
+    if min(counts) < 0:
+        raise CliError("counts must be 0 or more")
+    append_review(ctx.layout, round(ctx.now, 3), args.bundle, *counts)
+    ctx.say("🔋 **pitstop** · review: %d cycles · %d approved · %d rejected" % counts)
 
 
 _COMMANDS = {
@@ -374,6 +393,7 @@ _COMMANDS = {
     "gap": cmd_gap,
     "report": cmd_report,
     "review-bundle": cmd_review_bundle,
+    "review-done": cmd_review_done,
     "config": cmd_config,
 }
 
@@ -410,7 +430,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--quiet", action="store_true", help="update metrics.jsonl, print nothing")
     report.add_argument("--import-audit", metavar="PATH", help="first import the cycles of an audit-data.json")
     bundle = sub.add_parser("review-bundle", help="refresh the report, write the chat around the last resumes")
-    bundle.add_argument("--n", type=int, help="how many resumed cycles (default: review_sample in config.json)")
+    bundle.add_argument("--n", type=int, help="how many resumed cycles, 1-100 (default: review_sample in config.json, "
+                                              "or all resumed since the last review when more)")
+    done = sub.add_parser("review-done", help="log a finished /pitstop review in reviews.jsonl")
+    done.add_argument("--bundle", required=True)
+    for name in ("--cycles", "--approved", "--rejected"):
+        done.add_argument(name, type=int, required=True)
     config = sub.add_parser("config", help="set a numeric setting in config.json (%s)" % ", ".join(_INT_RANGES))
     config.add_argument("key")
     config.add_argument("value")

@@ -40,3 +40,5 @@ class Layout:
         self.report_stamp = base / "report-last-run.txt"
         self.config_notice = base / "config-notice.txt"
         self.reviews_dir = base / "reviews"
+        self.reviews_log = base / "reviews.jsonl"
+        self.review_reminder_stamp = base / "review-reminder-last.txt"
