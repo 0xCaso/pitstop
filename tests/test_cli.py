@@ -405,3 +405,34 @@ class ReviewBundleTest(CliTestCase):
         code, lines, folder = self.bundle()
         self.assertEqual(code, 0)
         self.assertEqual([p.name for p in folder.iterdir()], ["c.md"])
+
+
+class ConfigCommandTest(CliTestCase):
+    def test_config_sets_threshold(self):
+        self.assertEqual(self.cli("config", "threshold_tokens", "190000"),
+                         (0, "🔋 pitstop · threshold_tokens = 190000\n"))
+        saved = json.loads(self.layout.config.read_text(encoding="utf-8"))
+        self.assertEqual(saved["threshold_tokens"], 190000)
+        self.assertNotIn("soft_threshold_tokens", saved)
+        self.assertNotIn("hard_threshold_tokens", saved)
+
+    def test_config_sets_review_sample(self):
+        self.assertEqual(self.cli("config", "review_sample", "8")[0], 0)
+        self.assertEqual(load_config(self.layout)[0].review_sample, 8)
+
+    def test_config_refuses_out_of_order(self):
+        self.cli("config", "threshold_tokens", "200000")
+        before = self.layout.config.read_bytes()
+        code, out = self.cli("config", "soft_threshold_tokens", "250000")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "🔋 pitstop · limits out of order "
+                              "(soft_threshold_tokens < threshold_tokens < hard_threshold_tokens)\n")
+        self.assertEqual(self.layout.config.read_bytes(), before)
+
+    def test_config_unknown_key(self):
+        self.assertEqual(self.cli("config", "enabled", "1"), (1, "🔋 pitstop · unknown key: enabled\n"))
+        self.assertFalse(self.layout.config.exists())
+
+    def test_config_not_an_integer(self):
+        self.assertEqual(self.cli("config", "review_sample", "five"),
+                         (1, "🔋 pitstop · review_sample must be an integer\n"))
