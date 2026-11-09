@@ -26,6 +26,7 @@ class Cycle:
     done_tokens: Optional[int] = None
     restart: Optional[str] = None
     checkpoint: Dict[str, int] = field(default_factory=dict)
+    checkpoint_path: Optional[str] = None
     resume_ts: Optional[float] = None
     resume_session: Optional[str] = None
     resume_base: Optional[int] = None
@@ -65,6 +66,7 @@ def _apply(cycle: Cycle, event: Dict[str, Any]) -> None:
         cycle.done_tokens = event.get("context_tokens")
         cycle.restart = event.get("restart")
         cycle.kind = event.get("kind")
+        cycle.checkpoint_path = event["checkpoint"] if isinstance(event.get("checkpoint"), str) else None
         # chat_text_filled is a bool in the log: stored as 0 or 1 like the other measures.
         cycle.checkpoint = {key: int(event[key]) for key in CHECKPOINT_MEASURES
                             if isinstance(event.get(key), (int, float))}

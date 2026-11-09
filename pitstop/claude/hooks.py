@@ -1,5 +1,6 @@
 """Hook handlers: glue between Claude Code events and the pitstop core. Every error fails open."""
 import os
+import re
 import subprocess
 import sys
 import time
@@ -239,11 +240,17 @@ def _is_fresh_session(transcript_path: str) -> bool:
         return True
 
 
+# A prompt a plugin submits between turns, as Claude Code rewrites it: "The waggle plugin sent a message:\n…".
+_PLUGIN_PROMPT = re.compile(r"The [\w.@/-]+ plugin sent a message:\n")
+
+
 def _is_harness_notification(prompt: Optional[str]) -> bool:
     """A prompt the harness sends on its own, not the user: e.g. a background task's notification, which an SDK
     host (T3 Code) delivers as a UserPromptSubmit: `<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]…`
-    followed by `<task-notification>…</task-notification>`."""
+    followed by `<task-notification>…</task-notification>`; or a plugin's message (Waggle's wake message)."""
     text = (prompt or "").strip()
+    if _PLUGIN_PROMPT.match(text):
+        return True
     if text.startswith("<task-notification>"):
         return True
     if text.startswith("<system-reminder>"):
