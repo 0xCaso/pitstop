@@ -20,6 +20,14 @@ class ParseConfigTest(unittest.TestCase):
         with self.assertRaises(ConfigError):
             parse_config({"metrics": "on"})
 
+    def test_review_sample_default_and_range(self):
+        self.assertEqual(Config().review_sample, 5)
+        self.assertEqual(parse_config({"review_sample": 20}).review_sample, 20)
+        for value in (0, 21):
+            with self.subTest(value=value):
+                with self.assertRaises(ConfigError):
+                    parse_config({"review_sample": value})
+
     def test_defaults_three_limits(self):
         config = Config()
         self.assertEqual((config.soft_threshold_tokens, config.threshold_tokens, config.hard_threshold_tokens),

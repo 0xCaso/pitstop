@@ -18,6 +18,13 @@ NOTIFICATION = (
     "<summary>Background command \"npm run dev\" was stopped</summary>\n</task-notification>"
 )
 
+# A prompt a plugin submits between turns (Waggle's wake message), as Claude Code rewrites it (seen in T3 Code).
+PLUGIN_PROMPT = (
+    "The waggle plugin sent a message:\nWaggle: the human answered \"Is the plan correct?\". Call waggle_check "
+    "with case_id c_1 now.\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it "
+    "starts this turn in the user's place. Address the message above."
+)
+
 EVENT_NAMES = {"stop": "Stop", "post-tool-batch": "PostToolBatch", "user-prompt-submit": "UserPromptSubmit",
                "session-start": "SessionStart", "pre-tool-use": "PreToolUse"}
 
@@ -613,6 +620,12 @@ class InPlaceRecordHookTest(PendingMixin, HookTestCase):
         for prompt in (NOTIFICATION, "<task-notification>\n<status>completed</status>\n</task-notification>"):
             with self.subTest(prompt=prompt[:30]):
                 self.assertIsNone(self.call_hook("user-prompt-submit", prompt=prompt))
+        self.assertEqual(read_events(self.layout), [])
+        self.assertIsNotNone(self.call_hook("session-start", source="compact"))
+
+    def test_a_plugin_prompt_keeps_it(self):
+        self.pending(restart="compact")
+        self.assertIsNone(self.call_hook("user-prompt-submit", prompt=PLUGIN_PROMPT))
         self.assertEqual(read_events(self.layout), [])
         self.assertIsNotNone(self.call_hook("session-start", source="compact"))
 

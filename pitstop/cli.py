@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Mapping, Optional, TextIO
 from pitstop.claude import messages
 from pitstop.claude.hooks import run_hook
 from pitstop.claude.report_scan import calls_after, projects_dirs, skip_categories
+from pitstop.claude.review_scan import AFTER_CHARS, BEFORE_CHARS, chat_excerpt
 from pitstop.claude.transcript import (
     TranscriptSchemaError,
     default_projects_dir,
@@ -22,12 +23,13 @@ from pitstop.claude.transcript import (
 )
 from pitstop.core.build import new_cycle_id
 from pitstop.core.checkpoint import analyze_checkpoint
-from pitstop.core.config import ConfigError, load_config, update_config
+from pitstop.core.config import _INT_RANGES, ConfigError, load_config, update_config
 from pitstop.core.cycles import Cycle, build_cycles, next_start
 from pitstop.core.fsutil import append_line, atomic_write_text
 from pitstop.core.log import log_event, read_events
 from pitstop.core.metrics import append_rows, cycle_row, import_audit, load_rows, summary
 from pitstop.core.paths import Layout, pitstop_home
+from pitstop.core.review import pick_sample
 from pitstop.core.state import load_state, locked_state
 from pitstop.core.store import PendingRecord, mark_pending, new_checkpoint_path, prune_old_files, write_checkpoint
 
@@ -291,6 +293,75 @@ def cmd_report(args: argparse.Namespace, ctx: Ctx) -> None:
         ctx.say(line)
 
 
+def cmd_config(args: argparse.Namespace, ctx: Ctx) -> None:
+    """Set one numeric setting. update_config validates it, limit order included, before writing anything."""
+    if args.key not in _INT_RANGES:
+        raise CliError("unknown key: %s" % args.key)
+    try:
+        value = int(args.value)
+    except ValueError:
+        raise CliError("%s must be an integer" % args.key) from None
+    update_config(ctx.layout, **{args.key: value})
+    ctx.say("🔋 pitstop · %s = %d" % (args.key, value))
+
+
+BEFORE_WINDOW_SECONDS = 3600  # the chat before the restart starts at least this long before the checkpoint
+
+
+def _excerpt(path: Optional[Path], start: Optional[float], end: Optional[float], max_chars: int, keep: str) -> str:
+    if path is None:
+        return "transcript not found"
+    try:
+        return chat_excerpt(path, start, end, max_chars, keep) or "—"
+    except OSError:
+        return "transcript not found"
+
+
+def _number_or_dash(value: Any) -> str:
+    return "—" if value is None else str(value)
+
+
+def _k_or_dash(value: Any) -> str:
+    return messages.k(value) if isinstance(value, int) else "—"
+
+
+def _review_file(cycle: Cycle, cycles: List[Cycle], transcripts: _Transcripts) -> str:
+    asked_from = [ts for ts in (cycle.first_offer_ts, cycle.first_request_ts) if ts is not None]
+    if cycle.done_ts is not None:
+        asked_from.append(cycle.done_ts - BEFORE_WINDOW_SECONDS)
+    before = _excerpt(transcripts.get(cycle.session), min(asked_from) if asked_from else None, cycle.done_ts,
+                      BEFORE_CHARS, "tail")
+    try:
+        checkpoint = Path(cycle.checkpoint_path or "").read_text(encoding="utf-8").strip()
+    except OSError:
+        checkpoint = "checkpoint not found: %s" % cycle.checkpoint_path
+    after = _excerpt(transcripts.get(cycle.resume_session), cycle.resume_ts,
+                     next_start(cycles, cycle.resume_session, cycle.resume_ts), AFTER_CHARS, "head")
+    header = "v %s · host %s · kind %s · restart %s · %s → %s tokens · gaps %d" % (
+        cycle.v, _number_or_dash(cycle.host), _number_or_dash(cycle.kind), _number_or_dash(cycle.restart),
+        _number_or_dash(cycle.done_tokens), _number_or_dash(cycle.resume_base), cycle.gaps)
+    return "# cycle %s\n%s\n\n## Before the restart\n%s\n\n## Checkpoint\n%s\n\n## After the resume\n%s\n" % (
+        cycle.cycle_id, header, before, checkpoint, after)
+
+
+def cmd_review_bundle(args: argparse.Namespace, ctx: Ctx) -> None:
+    cmd_report(argparse.Namespace(quiet=False, import_audit=None), ctx)
+    config, _ = load_config(ctx.layout)
+    cycles = build_cycles(read_events(ctx.layout), ctx.now)
+    sample = pick_sample(cycles, args.n if args.n is not None else config.review_sample)
+    if not sample:
+        raise CliError("no resumed cycles to review")
+    folder = ctx.layout.reviews_dir / time.strftime("%Y%m%d-%H%M%S", time.localtime(ctx.now))
+    transcripts = _Transcripts(ctx.report_dirs)
+    ctx.say("bundle: %s" % folder)
+    for cycle in sample:
+        path = folder / ("%s.md" % cycle.cycle_id)
+        atomic_write_text(path, _review_file(cycle, cycles, transcripts))
+        ctx.say("cycle %s · v %s · %s · %s → %s · %s" % (cycle.cycle_id, cycle.v, _number_or_dash(cycle.host),
+                                                       _k_or_dash(cycle.done_tokens), _k_or_dash(cycle.resume_base),
+                                                       path))
+
+
 _COMMANDS = {
     "on": cmd_on,
     "off": cmd_off,
@@ -302,6 +373,8 @@ _COMMANDS = {
     "mark-pending": cmd_mark_pending,
     "gap": cmd_gap,
     "report": cmd_report,
+    "review-bundle": cmd_review_bundle,
+    "config": cmd_config,
 }
 
 
@@ -336,6 +409,11 @@ def build_parser() -> argparse.ArgumentParser:
     report = sub.add_parser("report", help="rebuild the pitstop cycles, add the closed ones to metrics.jsonl")
     report.add_argument("--quiet", action="store_true", help="update metrics.jsonl, print nothing")
     report.add_argument("--import-audit", metavar="PATH", help="first import the cycles of an audit-data.json")
+    bundle = sub.add_parser("review-bundle", help="refresh the report, write the chat around the last resumes")
+    bundle.add_argument("--n", type=int, help="how many resumed cycles (default: review_sample in config.json)")
+    config = sub.add_parser("config", help="set a numeric setting in config.json (%s)" % ", ".join(_INT_RANGES))
+    config.add_argument("key")
+    config.add_argument("value")
     return parser
 
 

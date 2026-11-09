@@ -318,3 +318,121 @@ class ReportTest(CliTestCase):
         self.assertEqual(code, 0)
         self.assertEqual([r["cycle_id"] for r in load_rows(self.layout)], ["audit-3", "c1", "c3"])
         self.assertIn("v pre-0.2 · cycles 1 · resumed 100% · median reduction 60% · gaps — · chat text —", out.splitlines())
+
+
+def _user_said(text, ts, session):
+    return {"type": "user", "isSidechain": False, "sessionId": session, "timestamp": _iso(ts),
+            "message": {"role": "user", "content": text}}
+
+
+class ReviewBundleTest(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        self.checkpoints = {}
+        for n, cycle in enumerate(("a", "b", "c")):
+            t = NOW - 30000 + n * 10000
+            path = self.tmp / ("cp-%s.md" % cycle)
+            path.write_text("# pitstop checkpoint — %s\n## Next action\nship %s" % (cycle, cycle), encoding="utf-8")
+            self.checkpoints[cycle] = path
+            for line in (
+                _event("request", t, cycle, "s-" + cycle, v="0.3.1", context_tokens=205000, host="t3-code"),
+                _event("pitstop_done", t + 60, cycle, "s-" + cycle, v="0.3.1", context_tokens=210000,
+                       restart="compact", kind="code", checkpoint=str(path)),
+                _event("resume", t + 90, cycle, "r-" + cycle),
+                _event("resume_base", t + 100, cycle, "r-" + cycle, resume_base=80000),
+            ):
+                append_line(self.layout.log, line)
+            write_jsonl(self.projects / "-work-repo" / ("s-%s.jsonl" % cycle), [
+                _user_said("too early %s" % cycle, t - 7200, "s-" + cycle),
+                _user_said("please plan %s" % cycle, t - 100, "s-" + cycle),
+                _said("planning %s" % cycle, t + 30, "m-" + cycle, "s-" + cycle),
+                _said("after the done %s" % cycle, t + 70, "x-" + cycle, "s-" + cycle),
+            ])
+            write_jsonl(self.projects / "-work-repo" / ("r-%s.jsonl" % cycle), [
+                _said("resumed %s" % cycle, t + 95, "q-" + cycle, "r-" + cycle),
+            ])
+
+    def bundle(self, *extra):
+        code, out = self.cli("review-bundle", *extra)
+        lines = out.splitlines()
+        folder = next((Path(l[len("bundle: "):]) for l in lines if l.startswith("bundle: ")), None)
+        return code, lines, folder
+
+    def test_review_bundle_writes_one_file_per_cycle(self):
+        code, lines, folder = self.bundle("--n", "2")
+        self.assertEqual(code, 0)
+        self.assertTrue(lines[0].startswith("🔋 pitstop report · "))
+        self.assertEqual(folder.parent, self.layout.reviews_dir)
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["b.md", "c.md"])
+        cycle_lines = [l for l in lines if l.startswith("cycle ")]
+        self.assertEqual(cycle_lines, [
+            "cycle c · v 0.3.1 · t3-code · 210K → 80K · %s" % (folder / "c.md"),
+            "cycle b · v 0.3.1 · t3-code · 210K → 80K · %s" % (folder / "b.md"),
+        ])
+        text = (folder / "c.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# cycle c\nv 0.3.1 · host t3-code · kind code · restart compact · "
+                                        "210000 → 80000 tokens · gaps 0\n"))
+        before = text.split("## Before the restart\n")[1].split("## Checkpoint\n")[0]
+        self.assertIn("[user] please plan c", before)
+        self.assertIn("[assistant] planning c", before)
+        self.assertNotIn("too early", before)
+        self.assertNotIn("after the done", before)
+        self.assertIn("## Checkpoint\n# pitstop checkpoint — c\n## Next action\nship c", text)
+        self.assertIn("## After the resume\n[assistant] resumed c", text)
+
+    def test_bundle_missing_transcript(self):
+        (self.projects / "-work-repo" / "r-c.jsonl").unlink()
+        code, lines, folder = self.bundle("--n", "1")
+        self.assertEqual(code, 0)
+        self.assertIn("## After the resume\ntranscript not found", (folder / "c.md").read_text(encoding="utf-8"))
+
+    def test_bundle_missing_checkpoint(self):
+        self.checkpoints["c"].unlink()
+        code, lines, folder = self.bundle("--n", "1")
+        self.assertEqual(code, 0)
+        self.assertIn("## Checkpoint\ncheckpoint not found: %s" % self.checkpoints["c"],
+                      (folder / "c.md").read_text(encoding="utf-8"))
+
+    def test_bundle_no_cycles(self):
+        self.layout.log.unlink()
+        code, lines, folder = self.bundle()
+        self.assertEqual(code, 1)
+        self.assertEqual(lines[-1], "🔋 pitstop · no resumed cycles to review")
+        self.assertIsNone(folder)
+
+    def test_review_bundle_default_n_from_config(self):
+        self.layout.config.write_text(json.dumps({"review_sample": 1}), encoding="utf-8")
+        code, lines, folder = self.bundle()
+        self.assertEqual(code, 0)
+        self.assertEqual([p.name for p in folder.iterdir()], ["c.md"])
+
+
+class ConfigCommandTest(CliTestCase):
+    def test_config_sets_threshold(self):
+        self.assertEqual(self.cli("config", "threshold_tokens", "190000"),
+                         (0, "🔋 pitstop · threshold_tokens = 190000\n"))
+        saved = json.loads(self.layout.config.read_text(encoding="utf-8"))
+        self.assertEqual(saved["threshold_tokens"], 190000)
+        self.assertNotIn("soft_threshold_tokens", saved)
+        self.assertNotIn("hard_threshold_tokens", saved)
+
+    def test_config_sets_review_sample(self):
+        self.assertEqual(self.cli("config", "review_sample", "8")[0], 0)
+        self.assertEqual(load_config(self.layout)[0].review_sample, 8)
+
+    def test_config_refuses_out_of_order(self):
+        self.cli("config", "threshold_tokens", "200000")
+        before = self.layout.config.read_bytes()
+        code, out = self.cli("config", "soft_threshold_tokens", "250000")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "🔋 pitstop · limits out of order "
+                              "(soft_threshold_tokens < threshold_tokens < hard_threshold_tokens)\n")
+        self.assertEqual(self.layout.config.read_bytes(), before)
+
+    def test_config_unknown_key(self):
+        self.assertEqual(self.cli("config", "enabled", "1"), (1, "🔋 pitstop · unknown key: enabled\n"))
+        self.assertFalse(self.layout.config.exists())
+
+    def test_config_not_an_integer(self):
+        self.assertEqual(self.cli("config", "review_sample", "five"),
+                         (1, "🔋 pitstop · review_sample must be an integer\n"))

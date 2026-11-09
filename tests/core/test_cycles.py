@@ -25,6 +25,10 @@ class BuildCyclesTest(unittest.TestCase):
         self.assertEqual(len(cycles), 1)
         return cycles[0]
 
+    def test_done_keeps_checkpoint_path(self):
+        self.assertEqual(self.one([REQUEST, dict(DONE, checkpoint="/x/c.md")]).checkpoint_path, "/x/c.md")
+        self.assertIsNone(self.one([REQUEST, dict(DONE, checkpoint=12)]).checkpoint_path)
+
     def test_resumed_cycle_closes_when_the_resumed_session_is_asked_again(self):
         events = [REQUEST, DONE, ev("resume", T + 90, session_id="s2"),
                   ev("resume_base", T + 100, session_id="s2", resume_base=70000),
