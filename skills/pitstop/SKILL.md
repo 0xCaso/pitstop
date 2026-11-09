@@ -142,16 +142,15 @@ artifacts and never summarizes them. Text that exists only in the conversation i
 
 ## Goal
 ## Current state
+Last reply to the user: SENT | NOT SENT (if NOT SENT, it goes word for word under Chat-only text)
 ## Next action
 <one precise action>
 ## Chat-only text
 <word for word, or the path of a support file, or —>
 ## Decisions made
-- <decision> — <reason>
+- <decision> — <reason> (over <option>, when that option may come back)
 ## User preferences
 - "<exact quote>"
-## Discarded
-- <option> — <why>
 ## Re-read
 - `path/to/file:line` — <why the next action needs it>
 ## Unsaved or uncommitted work
@@ -168,6 +167,9 @@ artifacts and never summarizes them. Text that exists only in the conversation i
   "Checkpoint procedure") and cite that file. Never replace it with a description. Write `—` only when there is
   none. With `--kind other` (research, writing, strategy) most of the state lives here: fill it first.
 - For --kind other the state lives in the chat: put the tables, lists, figures and sources the next action needs under "Chat-only text" word for word, and when they pass about 1K tokens save them to a support file and cite it.
+- Exact strings the remaining work needs (commands that worked, ids, model names, paths, error text, the option
+  texts of a choice the user made) go word for word, never as a description.
+- Mark with `(assumed)` a fact you did not check in a file, a command output or the user's words.
 - Leave out secrets, tokens, passwords and personal data.
 - Write `—` under an empty section.
 

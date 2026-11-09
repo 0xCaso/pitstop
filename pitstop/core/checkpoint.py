@@ -8,7 +8,10 @@ CHAT_TEXT = "Chat-only text"
 REREAD = "Re-read"
 # The section titles of the checkpoint template in SKILL.md, in English in every language.
 TEMPLATE_TITLES = frozenset({"Goal", "Current state", "Next action", CHAT_TEXT, "Decisions made", "User preferences",
-                             "Discarded", REREAD, "Unsaved or uncommitted work", "Open questions", "Suggested skills"})
+                             REREAD, "Unsaved or uncommitted work", "Open questions", "Suggested skills"})
+# Titles the template had before (0.5.0 dropped "Discarded"): old checkpoints still split and count the same.
+LEGACY_TITLES = frozenset({"Discarded"})
+_TITLES = TEMPLATE_TITLES | LEGACY_TITLES
 EMPTY = "—"
 _BACKTICKS = re.compile(r"`([^`]+)`")
 # Between two paths of one entry: a comma, a semicolon, "and", "e" or "&".
@@ -40,11 +43,11 @@ def _sections(text: str) -> Dict[str, str]:
         if line.lstrip().startswith("```"):
             fenced = not fenced
         heading = line[3:].strip() if line.startswith("## ") and not fenced else None
-        if heading is not None and (heading in TEMPLATE_TITLES or not templated):
+        if heading is not None and (heading in _TITLES or not templated):
             if title is not None:
                 sections[title] = "\n".join(body)
             title, body = heading, []
-            templated = templated or heading in TEMPLATE_TITLES
+            templated = templated or heading in _TITLES
         elif title is not None:
             body.append(line)
     if title is not None:
