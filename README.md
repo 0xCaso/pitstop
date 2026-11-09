@@ -106,7 +106,9 @@ a clone).
   "retrigger_step_tokens": 50000,
   "resume_window_minutes": 60,
   "metrics": false,
-  "review_sample": 5
+  "review_sample": 20,
+  "review_remind_cycles": 20,
+  "review_remind_gaps": 2
 }
 ```
 
@@ -118,7 +120,9 @@ a clone).
 | `retrigger_step_tokens` | Past the hard limit, during a long turn, how many more tokens before asking again |
 | `resume_window_minutes` | How long a checkpoint stays valid for an automatic resume (1–60) |
 | `metrics` | Run `pitstop report` in the background once a day, at session start |
-| `review_sample` | How many recent resumes `/pitstop review` reads (1–20) |
+| `review_sample` | How many recent resumes `/pitstop review` reads at least; it reads all resumes since the last logged review when there are more, up to 100; the first review reads only this many (1–100) |
+| `review_remind_cycles` | Closed cycles since the last review that bring the `/pitstop review` reminder (1–1000) |
+| `review_remind_gaps` | Gaps since the last review that bring the `/pitstop review` reminder (1–100) |
 
 The limits must grow in this order: soft, threshold, hard. A file that sets only `threshold_tokens` gets the
 soft limit 30K below it (at least 50K) and the hard limit 80K above it.
@@ -162,12 +166,20 @@ checkpoints and transcripts are deleted. To find skips and calls, the report rea
 Claude profile on the machine (`$CLAUDE_CONFIG_DIR` and `~/.claude*/projects`).
 
 `/pitstop review` goes one step further, and is the only part that spends tokens. `pitstop review-bundle`
-refreshes the report and writes, for the last `review_sample` resumes, one local file per pitstop: the chat
+refreshes the report and writes, for the last `review_sample` resumes (or all resumes since the last review, when
+there are more, up to 100), one local file per pitstop: the chat
 before the restart, the checkpoint, and the chat after the resume (tool output left out, each part capped).
 Claude reads them, looks for what the resumed session needed but the checkpoint did not keep, and proposes
 changes one by one, with the evidence: in Waggle when it is installed, otherwise in chat. A number is changed
 with `pitstop config` only after your yes; an approved checkpoint rule is written to `review.md` next to the
-files. The files stay in `reviews/` in the pitstop folder.
+files, with the SKILL.md edit it needs, and takes effect in the release that ships that edit. The files stay in
+`reviews/` in the pitstop folder. At the end, `pitstop review-done` adds one line to `reviews.jsonl` (date,
+cycles read, proposals approved and rejected).
+
+When a session starts and the last review is 20 closed cycles or 2 gaps behind (`review_remind_cycles`,
+`review_remind_gaps`), pitstop shows one line, at most once a day:
+`🔋 pitstop · N closed cycles and G gaps since the last review → run /pitstop review`. `/pitstop notify off`
+turns it off with the other notices.
 
 `metrics` is off by default. With `/pitstop metrics on`, the report also runs by itself in the background, at most
 once a day, when a session starts.
@@ -180,7 +192,8 @@ folder does not exist yet, pitstop keeps using `~/.claude/pitstop/`; to separate
 `PITSTOP_HOME` for it (it always wins). `/pitstop status` prints the folder in use. It holds `config.json`,
 `checkpoints/`, `pending/`, `state/`, `log.jsonl`, `gaps.jsonl` and, once you run the report, `metrics.jsonl`,
 `report-last-run.txt` and two lock files, `metrics.lock` and `report-last-run.lock`, and, once you run a review,
-`reviews/`, which holds excerpts of your conversations. The log and the metrics hold token counts, states and categories, not conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
+`reviews/`, which holds excerpts of your conversations, and `reviews.jsonl`, one line per review (counts only).
+The once-a-day review reminder uses `review-reminder-last.txt` and `review-reminder.lock`. The log and the metrics hold token counts, states and categories, not conversation text. Checkpoints do contain a summary of your session, written without secrets or personal data by
 instruction. Checkpoints and session state files older than 30 days are deleted at the next pitstop.
 
 ## Development

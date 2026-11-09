@@ -21,12 +21,20 @@ class ParseConfigTest(unittest.TestCase):
             parse_config({"metrics": "on"})
 
     def test_review_sample_default_and_range(self):
-        self.assertEqual(Config().review_sample, 5)
-        self.assertEqual(parse_config({"review_sample": 20}).review_sample, 20)
-        for value in (0, 21):
+        self.assertEqual(Config().review_sample, 20)
+        self.assertEqual(parse_config({"review_sample": 100}).review_sample, 100)
+        for value in (0, 101):
             with self.subTest(value=value):
                 with self.assertRaises(ConfigError):
                     parse_config({"review_sample": value})
+
+    def test_review_remind_defaults_and_ranges(self):
+        self.assertEqual((Config().review_remind_cycles, Config().review_remind_gaps), (20, 2))
+        self.assertEqual(parse_config({"review_remind_cycles": 1000, "review_remind_gaps": 100}).review_remind_gaps, 100)
+        for key, value in (("review_remind_cycles", 0), ("review_remind_gaps", 0), ("review_remind_cycles", 1001)):
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ConfigError):
+                    parse_config({key: value})
 
     def test_defaults_three_limits(self):
         config = Config()

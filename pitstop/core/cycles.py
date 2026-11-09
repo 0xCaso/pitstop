@@ -83,7 +83,7 @@ def _apply(cycle: Cycle, event: Dict[str, Any]) -> None:
         cycle.expired = True
 
 
-def _start(cycle: Cycle) -> Optional[float]:
+def cycle_start(cycle: Cycle) -> Optional[float]:
     """When a cycle began: its first offer or request, or its checkpoint for a pitstop nobody offered or requested."""
     asked = [ts for ts in (cycle.first_offer_ts, cycle.first_request_ts) if ts is not None]
     return min(asked) if asked else cycle.done_ts
@@ -91,7 +91,7 @@ def _start(cycle: Cycle) -> Optional[float]:
 
 def next_start(cycles: List[Cycle], session: Optional[str], after: float) -> Optional[float]:
     """When the session's next cycle began after `after`; None if it has none yet."""
-    starts = (_start(c) for c in cycles if c.session == session)
+    starts = (cycle_start(c) for c in cycles if c.session == session)
     times = [start for start in starts if start is not None and start > after]
     return min(times) if times else None
 

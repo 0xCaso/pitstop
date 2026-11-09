@@ -142,16 +142,15 @@ artifacts and never summarizes them. Text that exists only in the conversation i
 
 ## Goal
 ## Current state
+Last reply to the user: SENT | NOT SENT (if NOT SENT, it goes word for word under Chat-only text)
 ## Next action
 <one precise action>
 ## Chat-only text
 <word for word, or the path of a support file, or —>
 ## Decisions made
-- <decision> — <reason>
+- <decision> — <reason> (over <option>, when that option may come back)
 ## User preferences
 - "<exact quote>"
-## Discarded
-- <option> — <why>
 ## Re-read
 - `path/to/file:line` — <why the next action needs it>
 ## Unsaved or uncommitted work
@@ -168,6 +167,9 @@ artifacts and never summarizes them. Text that exists only in the conversation i
   "Checkpoint procedure") and cite that file. Never replace it with a description. Write `—` only when there is
   none. With `--kind other` (research, writing, strategy) most of the state lives here: fill it first.
 - For --kind other the state lives in the chat: put the tables, lists, figures and sources the next action needs under "Chat-only text" word for word, and when they pass about 1K tokens save them to a support file and cite it.
+- Exact strings the remaining work needs (commands that worked, ids, model names, paths, error text, the option
+  texts of a choice the user made) go word for word, never as a description.
+- Mark with `(assumed)` a fact you did not check in a file, a command output or the user's words.
 - Leave out secrets, tokens, passwords and personal data.
 - Write `—` under an empty section.
 
@@ -199,12 +201,18 @@ This is the only pitstop command that spends tokens.
    checkpoint parts that the resume never used. A cycle with no problem gets "nothing missing".
 3. Write proposals. Each says what to change (a checkpoint content rule, or a number in `config.json`), the
    cycles that show it (cycle ids and a short quote), and the expected effect. No proposal without evidence from
-   at least one cycle; a number proposal also cites the report lines. No proposals: skip to step 6.
+   at least one cycle; a number proposal also cites the report lines. A content rule must be general: it names a
+   failure seen in at least 3 cycles, or in 1 cycle with real harm (wrong data, lost work). A rule that fits one
+   project or one wording is not proposed: write it as one line under "Not proposed" in `review.md`.
+   No proposals: skip to step 6.
 4. Ask; each proposal gets its own answer. With Waggle tools: one `waggle_ask`, one item per proposal, options
    approve and reject, with a markdown artifact holding the per-cycle findings. Without Waggle: list the
    proposals in chat and ask for a yes or no on each. Change nothing before the answer.
 5. Apply only the approved ones. A number: `pitstop config <key> <value>` (if it exits non-zero, show its line
-   and treat the proposal as not applied). A content rule: write it, with its evidence, to `review.md` in the
-   bundle folder (the `bundle:` line) under "Approved rules". Write the rejected ones under "Rejected", with the
-   reason given.
-6. End with one line: `🔋 **pitstop** · review: <N> cycles · <A> approved · <R> rejected`
+   and treat the proposal as not applied). A content rule: write it, with its evidence and the exact edit to
+   "Checkpoint content" in this SKILL.md, to `review.md` in the bundle folder (the `bundle:` line) under
+   "Approved rules"; it takes effect when that edit ships in a pitstop release. Write the rejected ones under
+   "Rejected", with the reason given.
+6. Run `pitstop review-done --bundle <bundle> --cycles <N> --approved <A> --rejected <R>` (N = cycles read,
+   A and R = proposals approved and rejected; 0 when there were none) and print its output line:
+   `🔋 **pitstop** · review: <N> cycles · <A> approved · <R> rejected`

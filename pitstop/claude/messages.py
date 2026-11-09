@@ -50,6 +50,10 @@ def banner_checkpoint_expired() -> str:
     return "🔋 pitstop · checkpoint expired, starting without it"
 
 
+def review_reminder(cycles: int, gaps: int) -> str:
+    return "🔋 pitstop · %d closed cycles and %d gaps since the last review → run /pitstop review" % (cycles, gaps)
+
+
 def notify_triggered(tokens: int) -> str:
     return "Pitting at %s: checkpoint at the next clean point" % k(tokens)
 
