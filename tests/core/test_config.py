@@ -28,6 +28,14 @@ class ParseConfigTest(unittest.TestCase):
                 with self.assertRaises(ConfigError):
                     parse_config({"review_sample": value})
 
+    def test_review_remind_defaults_and_ranges(self):
+        self.assertEqual((Config().review_remind_cycles, Config().review_remind_gaps), (20, 2))
+        self.assertEqual(parse_config({"review_remind_cycles": 1000, "review_remind_gaps": 100}).review_remind_gaps, 100)
+        for key, value in (("review_remind_cycles", 0), ("review_remind_gaps", 0), ("review_remind_cycles", 1001)):
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ConfigError):
+                    parse_config({key: value})
+
     def test_defaults_three_limits(self):
         config = Config()
         self.assertEqual((config.soft_threshold_tokens, config.threshold_tokens, config.hard_threshold_tokens),

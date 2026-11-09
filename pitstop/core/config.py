@@ -18,6 +18,8 @@ class Config:
     soft_threshold_tokens: int = 170000  # from here to the threshold: an offer at the end of a turn
     hard_threshold_tokens: int = 280000  # from here on: a pitstop is required
     review_sample: int = 20  # at least this many resumed cycles /pitstop review reads
+    review_remind_cycles: int = 20  # closed cycles since the last review before the reminder
+    review_remind_gaps: int = 2  # or this many gaps
 
 
 class ConfigError(Exception):
@@ -32,6 +34,8 @@ _INT_RANGES = {
     "soft_threshold_tokens": (10000, 900000),
     "hard_threshold_tokens": (50000, 2000000),
     "review_sample": (1, 100),
+    "review_remind_cycles": (1, 1000),
+    "review_remind_gaps": (1, 100),
 }
 _ORDER = "soft_threshold_tokens < threshold_tokens < hard_threshold_tokens"
 

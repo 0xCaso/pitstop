@@ -5,8 +5,9 @@ from unittest import mock
 from pitstop.claude import messages
 from pitstop.claude.hooks import run_hook
 from pitstop.core.config import update_config
-from pitstop.core.fsutil import LockTimeout
+from pitstop.core.fsutil import LockTimeout, append_line
 from pitstop.core.log import read_events
+from pitstop.core.reviewlog import append_review
 from pitstop.core.state import locked_state
 from pitstop.core.store import EXPIRED_NOTICE_HORIZON_SECONDS, PendingRecord, mark_pending
 from tests.helpers import NOW, TempLayoutTestCase, assistant_line, user_line, write_jsonl
@@ -728,3 +729,59 @@ class DailyReportTest(HookTestCase):
             out = self.call_hook("session-start", source="compact", now=later)
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
         self.assertEqual(len(self.spawned), 2)
+
+
+class ReviewReminderTest(HookTestCase):
+    """SessionStart: one line inviting /pitstop review past 20 closed cycles or 2 gaps since the last one."""
+
+    def closed_cycles(self, count, start=NOW - 3 * 86400):
+        for i in range(count):
+            t, cycle = start + i * 100, "c%d" % i
+            for action, ts, session in (("request", t, "s-" + cycle), ("pitstop_done", t + 10, "s-" + cycle),
+                                        ("resume", t + 20, "r-" + cycle)):
+                append_line(self.layout.log, json.dumps({"ts": ts, "event": "x", "action": action, "v": "0.5.0",
+                                                         "skill": "s", "session_id": session, "cycle_id": cycle}))
+
+    def gaps(self, count, ts=NOW - 3600):
+        for i in range(count):
+            append_line(self.layout.log, json.dumps({"ts": ts + i, "event": "cli", "action": "gap", "v": "0.5.0",
+                                                     "skill": "s", "session_id": "g", "cycle_id": "c0"}))
+
+    def message(self, now=NOW, **overrides):
+        out = self.call_hook("session-start", source=overrides.pop("source", "startup"), now=now, **overrides)
+        return out.get("systemMessage") if out else None
+
+    def test_reminder_after_twenty_closed_cycles(self):
+        self.closed_cycles(20)
+        self.assertEqual(self.message(), messages.review_reminder(20, 0))
+
+    def test_reminder_after_two_gaps(self):
+        self.gaps(2)
+        self.assertEqual(self.message(), messages.review_reminder(0, 2))
+
+    def test_no_reminder_below_thresholds_or_after_review(self):
+        self.closed_cycles(19)
+        self.gaps(1)
+        self.assertIsNone(self.message())
+        self.closed_cycles(6, start=NOW - 2 * 86400)
+        append_review(self.layout, NOW - 600, "/b", 25, 0, 0)
+        self.assertIsNone(self.message())
+
+    def test_reminder_shows_once_a_day(self):
+        self.closed_cycles(20)
+        self.assertIsNotNone(self.message())
+        self.assertIsNone(self.message(now=NOW + 3600))
+        self.assertIsNotNone(self.message(now=NOW + 25 * 3600))
+
+    def test_no_reminder_with_notify_off_for_subagents_or_compact(self):
+        self.closed_cycles(20)
+        self.assertIsNone(self.message(agent_id="a1"))
+        self.assertIsNone(self.message(source="compact"))
+        update_config(self.layout, notify=False)
+        self.assertIsNone(self.message())
+
+    def test_reminder_survives_broken_log(self):
+        self.layout.log.parent.mkdir(parents=True, exist_ok=True)
+        self.layout.log.write_text("garbage\n{\n", encoding="utf-8")
+        self.layout.reviews_log.mkdir(parents=True)  # unreadable as a file
+        self.assertIsNone(self.message())
