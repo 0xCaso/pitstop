@@ -106,6 +106,13 @@ class ReviewPluginTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
 
+    def test_review_survives_a_slow_first_report_and_no_proposals(self):
+        review = SKILL_PATH.read_text(encoding="utf-8").split("\n## Review\n", 1)[1]
+        for needle in ("timeout of 600000 ms", "No proposals: skip to step 6", "each proposal gets its own answer"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, review)
+        self.assertNotIn("one proposal at a time", review)
+
     def test_readme_documents_review_and_config(self):
         text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         for needle in ("`/pitstop review`", "`review_sample`", "pitstop config"):

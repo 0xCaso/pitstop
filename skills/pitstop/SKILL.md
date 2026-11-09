@@ -189,8 +189,9 @@ the checkpoint, read that file and follow these same steps.
 `/pitstop review`: check whether past checkpoints kept what the resumed sessions needed, and propose changes.
 This is the only pitstop command that spends tokens.
 
-1. Run `pitstop review-bundle` (it refreshes the report first). Show the report lines as is. If it exits
-   non-zero, show its `🔋 pitstop · <reason>` line and stop.
+1. Run `pitstop review-bundle` (it refreshes the report first) with a Bash timeout of 600000 ms: the first
+   report, without `metrics.jsonl`, reads every transcript and can take minutes. Show the report lines as is.
+   If it exits non-zero, show its `🔋 pitstop · <reason>` line and stop.
 2. Read each cycle file it lists. Each holds the chat before the restart, the checkpoint, and the chat after the
    resume. For each cycle, judge what the work after the resume needed that the checkpoint did not keep.
    Evidence counts only when it is in the file: the resumed session re-reads the old transcript, asks the user
@@ -198,10 +199,10 @@ This is the only pitstop command that spends tokens.
    checkpoint parts that the resume never used. A cycle with no problem gets "nothing missing".
 3. Write proposals. Each says what to change (a checkpoint content rule, or a number in `config.json`), the
    cycles that show it (cycle ids and a short quote), and the expected effect. No proposal without evidence from
-   at least one cycle; a number proposal also cites the report lines.
-4. Ask, one proposal at a time. With Waggle tools: one `waggle_ask`, one item per proposal, options approve and
-   reject, with a markdown artifact holding the per-cycle findings. Without Waggle: list the proposals in chat
-   and ask for a yes or no on each. Change nothing before the answer.
+   at least one cycle; a number proposal also cites the report lines. No proposals: skip to step 6.
+4. Ask; each proposal gets its own answer. With Waggle tools: one `waggle_ask`, one item per proposal, options
+   approve and reject, with a markdown artifact holding the per-cycle findings. Without Waggle: list the
+   proposals in chat and ask for a yes or no on each. Change nothing before the answer.
 5. Apply only the approved ones. A number: `pitstop config <key> <value>` (if it exits non-zero, show its line
    and treat the proposal as not applied). A content rule: write it, with its evidence, to `review.md` in the
    bundle folder (the `bundle:` line) under "Approved rules". Write the rejected ones under "Rejected", with the
