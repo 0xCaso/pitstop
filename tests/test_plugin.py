@@ -60,6 +60,20 @@ class PluginFilesTest(unittest.TestCase):
         template = text.split("```markdown", 1)[1].split("```", 1)[0]
         self.assertIn("## Next action\n<one precise action>\n## Chat-only text\n", template)
 
+    def test_skill_template_has_no_discarded_section(self):
+        template = SKILL_PATH.read_text(encoding="utf-8").split("```markdown\n# pitstop checkpoint", 1)[1].split("```", 1)[0]
+        self.assertNotIn("## Discarded", template)
+
+    def test_skill_template_has_reply_status_line(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn("Last reply to the user:", text)
+        self.assertIn("NOT SENT", text)
+
+    def test_skill_has_exact_text_and_assumed_rules(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        self.assertIn("never as a description", text)
+        self.assertIn("(assumed)", text)
+
     def test_skill_lists_the_fixed_skip_categories(self):
         text = SKILL_PATH.read_text(encoding="utf-8")
         self.assertIn("🔋 **pitstop** · skipped: <category> — <reason>", text)

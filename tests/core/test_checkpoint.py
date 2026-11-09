@@ -1,4 +1,4 @@
-from pitstop.core.checkpoint import analyze_checkpoint
+from pitstop.core.checkpoint import _sections, analyze_checkpoint
 from tests.helpers import TempLayoutTestCase
 
 TEMPLATE = """# pitstop checkpoint — topic
@@ -93,3 +93,25 @@ class AnalyzeCheckpointTest(TempLayoutTestCase):
         template = text.split("```markdown\n# pitstop checkpoint", 1)[1].split("```", 1)[0]
         titles = {line[3:].strip() for line in template.splitlines() if line.startswith("## ")}
         self.assertEqual(titles, TEMPLATE_TITLES)
+
+
+OLD_WITH_DISCARDED = """# pitstop checkpoint — topic
+
+## Goal
+Ship it.
+## Decisions made
+- A — fast
+## Discarded
+- B — slow
+## Re-read
+—
+"""
+
+
+class LegacyTitlesTest(TempLayoutTestCase):
+    def test_old_checkpoint_with_discarded_parses_as_before(self):
+        sections = _sections(OLD_WITH_DISCARDED)
+        self.assertNotIn("B — slow", sections["Decisions made"])
+        self.assertEqual(sections["Discarded"].strip(), "- B — slow")
+        stats = analyze_checkpoint(OLD_WITH_DISCARDED, str(self.tmp), str(self.tmp))
+        self.assertEqual(stats.sections_filled, 3)
