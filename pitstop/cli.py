@@ -23,7 +23,7 @@ from pitstop.claude.transcript import (
 )
 from pitstop.core.build import new_cycle_id
 from pitstop.core.checkpoint import analyze_checkpoint
-from pitstop.core.config import ConfigError, load_config, update_config
+from pitstop.core.config import _INT_RANGES, ConfigError, load_config, update_config
 from pitstop.core.cycles import Cycle, build_cycles, next_start
 from pitstop.core.fsutil import append_line, atomic_write_text
 from pitstop.core.log import log_event, read_events
@@ -293,6 +293,18 @@ def cmd_report(args: argparse.Namespace, ctx: Ctx) -> None:
         ctx.say(line)
 
 
+def cmd_config(args: argparse.Namespace, ctx: Ctx) -> None:
+    """Set one numeric setting. update_config validates it, limit order included, before writing anything."""
+    if args.key not in _INT_RANGES:
+        raise CliError("unknown key: %s" % args.key)
+    try:
+        value = int(args.value)
+    except ValueError:
+        raise CliError("%s must be an integer" % args.key) from None
+    update_config(ctx.layout, **{args.key: value})
+    ctx.say("🔋 pitstop · %s = %d" % (args.key, value))
+
+
 BEFORE_WINDOW_SECONDS = 3600  # the chat before the restart starts at least this long before the checkpoint
 
 
@@ -362,6 +374,7 @@ _COMMANDS = {
     "gap": cmd_gap,
     "report": cmd_report,
     "review-bundle": cmd_review_bundle,
+    "config": cmd_config,
 }
 
 
@@ -398,6 +411,9 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--import-audit", metavar="PATH", help="first import the cycles of an audit-data.json")
     bundle = sub.add_parser("review-bundle", help="refresh the report, write the chat around the last resumes")
     bundle.add_argument("--n", type=int, help="how many resumed cycles (default: review_sample in config.json)")
+    config = sub.add_parser("config", help="set a numeric setting in config.json (%s)" % ", ".join(_INT_RANGES))
+    config.add_argument("key")
+    config.add_argument("value")
     return parser
 
 
