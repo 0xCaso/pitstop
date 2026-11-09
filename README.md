@@ -120,7 +120,7 @@ a clone).
 | `retrigger_step_tokens` | Past the hard limit, during a long turn, how many more tokens before asking again |
 | `resume_window_minutes` | How long a checkpoint stays valid for an automatic resume (1–60) |
 | `metrics` | Run `pitstop report` in the background once a day, at session start |
-| `review_sample` | How many recent resumes `/pitstop review` reads at least; it reads all resumes since the last review when there are more, up to 100 (1–100) |
+| `review_sample` | How many recent resumes `/pitstop review` reads at least; it reads all resumes since the last logged review when there are more, up to 100; the first review reads only this many (1–100) |
 | `review_remind_cycles` | Closed cycles since the last review that bring the `/pitstop review` reminder (1–1000) |
 | `review_remind_gaps` | Gaps since the last review that bring the `/pitstop review` reminder (1–100) |
 

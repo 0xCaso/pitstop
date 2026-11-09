@@ -414,6 +414,11 @@ class ReviewBundleTest(CliTestCase):
         code, lines, folder = self.bundle()
         self.assertEqual(sorted(p.name for p in folder.iterdir()), ["b.md", "c.md"])
 
+    def test_review_bundle_without_a_logged_review_reads_only_review_sample(self):
+        self.layout.config.write_text(json.dumps({"review_sample": 1}), encoding="utf-8")
+        code, lines, folder = self.bundle()
+        self.assertEqual([p.name for p in folder.iterdir()], ["c.md"])
+
     def test_review_bundle_n_clamped(self):
         code, lines, folder = self.bundle("--n", "0")
         self.assertEqual([p.name for p in folder.iterdir()], ["c.md"])

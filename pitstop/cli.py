@@ -355,7 +355,8 @@ def cmd_review_bundle(args: argparse.Namespace, ctx: Ctx) -> None:
     if args.n is not None:
         n = min(MAX_SAMPLE, max(1, args.n))
     else:
-        n = sample_size(config.review_sample, count_resumed_since(cycles, last))
+        # No logged review yet: "since the last review" would mean every cycle ever, so read only review_sample.
+        n = sample_size(config.review_sample, 0 if last is None else count_resumed_since(cycles, last))
     sample = pick_sample(cycles, n)
     if not sample:
         raise CliError("no resumed cycles to review")
