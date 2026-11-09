@@ -15,8 +15,11 @@ from pitstop.core.build import new_cycle_id
 from pitstop.core.config import Config, load_config, should_show_config_notice
 from pitstop.core.decide import HARD, OFFER, REQUEST, Event, decide, segment_start
 from pitstop.core.fsutil import LockTimeout, atomic_write_text, file_lock
-from pitstop.core.log import log_event
+from pitstop.core.cycles import build_cycles
+from pitstop.core.log import log_event, read_events
 from pitstop.core.paths import Layout
+from pitstop.core.review import since_last_review
+from pitstop.core.reviewlog import last_review_ts
 from pitstop.core.state import SessionState, locked_state
 from pitstop.core.store import (
     PendingRecord,
@@ -302,11 +305,35 @@ def _spawn_report(argv: List[str]) -> None:
                      start_new_session=True)
 
 
-def _stamp(layout: Layout) -> Optional[float]:
+def _read_stamp(path: Path) -> Optional[float]:
     try:
-        return float(layout.report_stamp.read_text(encoding="utf-8").strip())
+        return float(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
+
+
+def maybe_review_reminder(layout: Layout, config: Config, now: float) -> Optional[str]:
+    """One line inviting /pitstop review when enough closed cycles or gaps piled up since the last review; at most
+    once a day (the stamp is re-read and rewritten under its lock). Never raises: None when nothing is shown."""
+    if not config.enabled or not config.notify:
+        return None
+    try:
+        with file_lock(layout.base / "review-reminder.lock", timeout=0.2):
+            last_shown = _read_stamp(layout.review_reminder_stamp)
+            if last_shown is not None and now - last_shown < REPORT_EVERY_SECONDS:
+                return None
+            events = read_events(layout)
+            cycles, gaps = since_last_review(build_cycles(events, now), events, last_review_ts(layout))
+            if cycles < config.review_remind_cycles and gaps < config.review_remind_gaps:
+                return None
+            atomic_write_text(layout.review_reminder_stamp, "%d\n" % int(now))
+            return messages.review_reminder(cycles, gaps)
+    except Exception:  # fail-open: the session starts whatever happens to the reminder
+        return None
+
+
+def _stamp(layout: Layout) -> Optional[float]:
+    return _read_stamp(layout.report_stamp)
 
 
 def maybe_start_daily_report(layout: Layout, config: Config, now: float,
@@ -336,7 +363,10 @@ def _handle_session_start(inp: HookInput, layout: Layout, notifier: Notifier, no
         return None
     config, _ = load_config(layout)
     maybe_start_daily_report(layout, config, now, _spawn_report)
-    if inp.source != "compact" or not has_pending(layout):
+    if inp.source != "compact":
+        reminder = maybe_review_reminder(layout, config, now)
+        return build_output("SessionStart", system_message=reminder) if reminder else None
+    if not has_pending(layout):
         return None
     record = consume_pending(layout, inp.session_id, inp.cwd, now, config.resume_window_minutes,
                              same_session_only=True)
