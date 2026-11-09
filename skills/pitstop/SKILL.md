@@ -1,6 +1,6 @@
 ---
 name: pitstop
-description: Use when the user types /pitstop (on, off, off here, now, status, notify on, notify off, metrics on, metrics off, report, gap) or when a "[pitstop]" hook message asks for a pitstop. Saves a checkpoint, then restarts from it: after /clear in the terminal, after /compact in T3 Code and other SDK hosts.
+description: Use when the user types /pitstop (on, off, off here, now, status, notify on, notify off, metrics on, metrics off, report, review, gap) or when a "[pitstop]" hook message asks for a pitstop. Saves a checkpoint, then restarts from it: after /clear in the terminal, after /compact in T3 Code and other SDK hosts.
 ---
 
 # pitstop
@@ -33,6 +33,7 @@ In the `/` menu this skill appears as `/pitstop:pitstop`. Below, `/pitstop <cmd>
 | `/pitstop notify on` · `/pitstop notify off` | `pitstop notify on` · `pitstop notify off` | Show the output line. |
 | `/pitstop metrics on` · `/pitstop metrics off` | `pitstop metrics on` · `pitstop metrics off` | Show the output line. |
 | `/pitstop report` | `pitstop report` | Show the output as is. |
+| `/pitstop review` | Follow "Review". | |
 | `/pitstop gap <what was missing>` | `pitstop gap "<what was missing>"` | Show the output line. |
 | `/pitstop now` | Follow "Manual pitstop". | |
 
@@ -182,3 +183,27 @@ restart": Grep it, then Read around the match with an offset), recover it, then 
 If the checkpoint had already expired (past the resume window but under 24 hours old), that first message
 instead carries a one-line notice with its path; answer normally and, only if the user later asks to resume from
 the checkpoint, read that file and follow these same steps.
+
+## Review
+
+`/pitstop review`: check whether past checkpoints kept what the resumed sessions needed, and propose changes.
+This is the only pitstop command that spends tokens.
+
+1. Run `pitstop review-bundle` (it refreshes the report first). Show the report lines as is. If it exits
+   non-zero, show its `🔋 pitstop · <reason>` line and stop.
+2. Read each cycle file it lists. Each holds the chat before the restart, the checkpoint, and the chat after the
+   resume. For each cycle, judge what the work after the resume needed that the checkpoint did not keep.
+   Evidence counts only when it is in the file: the resumed session re-reads the old transcript, asks the user
+   for something already said, redoes work, or contradicts a decision made before the restart. Also note the
+   checkpoint parts that the resume never used. A cycle with no problem gets "nothing missing".
+3. Write proposals. Each says what to change (a checkpoint content rule, or a number in `config.json`), the
+   cycles that show it (cycle ids and a short quote), and the expected effect. No proposal without evidence from
+   at least one cycle; a number proposal also cites the report lines.
+4. Ask, one proposal at a time. With Waggle tools: one `waggle_ask`, one item per proposal, options approve and
+   reject, with a markdown artifact holding the per-cycle findings. Without Waggle: list the proposals in chat
+   and ask for a yes or no on each. Change nothing before the answer.
+5. Apply only the approved ones. A number: `pitstop config <key> <value>` (if it exits non-zero, show its line
+   and treat the proposal as not applied). A content rule: write it, with its evidence, to `review.md` in the
+   bundle folder (the `bundle:` line) under "Approved rules". Write the rejected ones under "Rejected", with the
+   reason given.
+6. End with one line: `🔋 **pitstop** · review: <N> cycles · <A> approved · <R> rejected`

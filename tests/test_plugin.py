@@ -89,7 +89,25 @@ class ZonesPluginTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
 
-    def test_versions_are_0_3_1(self):
+    def test_versions_are_0_4_0(self):
         for path in (REPO_ROOT / "package.json", REPO_ROOT / ".claude-plugin" / "plugin.json"):
             with self.subTest(path=path.name):
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.3.1")
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.4.0")
+
+
+class ReviewPluginTest(unittest.TestCase):
+    def test_skill_lists_review(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        description = text.split("description:", 1)[1].split("\n", 1)[0]
+        self.assertIn("review", description)
+        for needle in ("| `/pitstop review` |", "\n## Review\n", "`pitstop review-bundle`",
+                       "`pitstop config <key> <value>`", "Approved rules",
+                       "🔋 **pitstop** · review: <N> cycles · <A> approved · <R> rejected"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+
+    def test_readme_documents_review_and_config(self):
+        text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        for needle in ("`/pitstop review`", "`review_sample`", "pitstop config"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
