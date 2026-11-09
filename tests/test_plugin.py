@@ -103,10 +103,10 @@ class ZonesPluginTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
 
-    def test_versions_are_0_4_0(self):
+    def test_versions_are_0_5_0(self):
         for path in (REPO_ROOT / "package.json", REPO_ROOT / ".claude-plugin" / "plugin.json"):
             with self.subTest(path=path.name):
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.4.0")
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.5.0")
 
 
 class ReviewPluginTest(unittest.TestCase):
@@ -126,6 +126,20 @@ class ReviewPluginTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, review)
         self.assertNotIn("one proposal at a time", review)
+
+    def test_review_logs_the_review_and_keeps_rules_general(self):
+        review = SKILL_PATH.read_text(encoding="utf-8").split("\n## Review\n", 1)[1]
+        for needle in ("`pitstop review-done --bundle <bundle> --cycles <N> --approved <A> --rejected <R>`",
+                       "at least 3 cycles", "Not proposed", "SKILL.md"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, review)
+
+    def test_readme_documents_review_log_and_reminder(self):
+        text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        for needle in ("review_remind_cycles", "review_remind_gaps", "reviews.jsonl", "review-reminder-last.txt",
+                       "review-reminder.lock", "pitstop review-done", "/pitstop notify off"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
 
     def test_readme_documents_review_and_config(self):
         text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
