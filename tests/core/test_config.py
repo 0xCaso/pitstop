@@ -21,9 +21,9 @@ class ParseConfigTest(unittest.TestCase):
             parse_config({"metrics": "on"})
 
     def test_review_sample_default_and_range(self):
-        self.assertEqual(Config().review_sample, 5)
-        self.assertEqual(parse_config({"review_sample": 20}).review_sample, 20)
-        for value in (0, 21):
+        self.assertEqual(Config().review_sample, 20)
+        self.assertEqual(parse_config({"review_sample": 100}).review_sample, 100)
+        for value in (0, 101):
             with self.subTest(value=value):
                 with self.assertRaises(ConfigError):
                     parse_config({"review_sample": value})

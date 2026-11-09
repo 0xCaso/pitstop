@@ -17,7 +17,7 @@ class Config:
     metrics: bool = False  # the daily background report and metrics.jsonl
     soft_threshold_tokens: int = 170000  # from here to the threshold: an offer at the end of a turn
     hard_threshold_tokens: int = 280000  # from here on: a pitstop is required
-    review_sample: int = 5  # resumed cycles /pitstop review reads
+    review_sample: int = 20  # at least this many resumed cycles /pitstop review reads
 
 
 class ConfigError(Exception):
@@ -31,7 +31,7 @@ _INT_RANGES = {
     "resume_window_minutes": (1, 60),
     "soft_threshold_tokens": (10000, 900000),
     "hard_threshold_tokens": (50000, 2000000),
-    "review_sample": (1, 20),
+    "review_sample": (1, 100),
 }
 _ORDER = "soft_threshold_tokens < threshold_tokens < hard_threshold_tokens"
 
