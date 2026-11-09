@@ -39,3 +39,4 @@ class Layout:
         self.metrics = base / "metrics.jsonl"
         self.report_stamp = base / "report-last-run.txt"
         self.config_notice = base / "config-notice.txt"
+        self.reviews_dir = base / "reviews"
