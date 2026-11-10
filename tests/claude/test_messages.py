@@ -68,14 +68,20 @@ class MessagesTest(unittest.TestCase):
 
 
 class PreviousTranscriptTest(unittest.TestCase):
+    def test_resume_context_sends_an_owed_reply_before_the_next_action(self):
+        text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop")
+        owed = text.index("Last reply to the user: NOT SENT")
+        self.assertLess(owed, text.index("Continue from the next action"))
+        self.assertIn("Never tell the user it was already sent", text)
+
     def test_resume_context_points_to_the_previous_transcript(self):
         record = dataclasses.replace(RECORD, project_dir="/p")
         self.assertEqual(previous_transcript(record), "/p/s1.jsonl")
         context = resume_context(record, "# cp", cli="/x/bin/pitstop")
         self.assertIn("Transcript before the restart: /p/s1.jsonl", context)
-        step4 = context.split("\n4. ", 1)[1].split("\n", 1)[0]
-        self.assertIn("/p/s1.jsonl", step4)
-        self.assertIn("gap", step4)
+        step5 = context.split("\n5. ", 1)[1].split("\n", 1)[0]
+        self.assertIn("/p/s1.jsonl", step5)
+        self.assertIn("gap", step5)
 
     def test_without_project_dir_there_is_no_transcript_line(self):
         self.assertIsNone(previous_transcript(RECORD))

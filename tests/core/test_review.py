@@ -43,6 +43,13 @@ class ReviewLogTest(TempLayoutTestCase):
         self.assertEqual(last_review_ts(self.layout), 300.0)
 
 
+    def test_last_review_survives_bad_bytes_and_non_finite_ts(self):
+        append_review(self.layout, 300.0, "/b1", 5, 3, 0)
+        with self.layout.reviews_log.open("ab") as f:
+            f.write(b"\xff\xfe not utf-8\n")
+            f.write(b'{"ts": Infinity}\n{"ts": NaN}\n')
+        self.assertEqual(last_review_ts(self.layout), 300.0)
+
 def closed(cycle_id, start, closed_=True):
     return Cycle(cycle_id=cycle_id, v="0.5.0", skill="s", first_request_ts=start, outcome="resumed",
                  resume_ts=start + 10, checkpoint_path="/c.md", closed=closed_)
@@ -54,6 +61,11 @@ class SinceLastReviewTest(unittest.TestCase):
         events = [{"action": "gap", "ts": 60}, {"action": "gap", "ts": 170}, {"action": "request", "ts": 180}]
         self.assertEqual(since_last_review(cycles, events, 100), (1, 1))
         self.assertEqual(since_last_review(cycles, events, None), (2, 2))
+
+    def test_since_last_review_counts_a_resumed_cycle_by_its_resume_time(self):
+        cycles = [closed("straddles", 95)]  # starts before the review, resumed at 105 after it
+        self.assertEqual(since_last_review(cycles, [], 100), (1, 0))
+        self.assertEqual(count_resumed_since(cycles, 100), 1)
 
     def test_count_resumed_since(self):
         cycles = [cycle("a", "resumed", 50), cycle("b", "resumed", 150), cycle("c", "dropped")]

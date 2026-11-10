@@ -1,5 +1,6 @@
 """reviews.jsonl: one line per /pitstop review."""
 import json
+import math
 from typing import Optional
 
 from pitstop.core.fsutil import append_line
@@ -14,8 +15,8 @@ def append_review(layout: Layout, ts: float, bundle: str, cycles: int, approved:
 def last_review_ts(layout: Layout) -> Optional[float]:
     """When the last review ran; None without reviews. Lines it cannot read are skipped."""
     try:
-        lines = layout.reviews_log.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
+        lines = layout.reviews_log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
         return None
     times = []
     for line in lines:
@@ -23,6 +24,6 @@ def last_review_ts(layout: Layout) -> Optional[float]:
             ts = json.loads(line).get("ts")
         except (ValueError, AttributeError):
             continue
-        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts):
             times.append(float(ts))
     return max(times) if times else None
