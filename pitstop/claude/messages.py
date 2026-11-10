@@ -147,9 +147,9 @@ def resume_context(record: PendingRecord, checkpoint_text: str, cli: str) -> str
     transcript = previous_transcript(record)
     gap = "`/usr/bin/python3 {cli} gap \"<what was missing>\"`".format(cli=cli)
     if transcript is None:
-        missing = "4. If something you need is missing from the checkpoint, run %s, then recover it.\n" % gap
+        missing = "5. If something you need is missing from the checkpoint, run %s, then recover it.\n" % gap
     else:
-        missing = ("4. If something you need is missing from the checkpoint, look for it in the transcript before "
+        missing = ("5. If something you need is missing from the checkpoint, look for it in the transcript before "
                    "the restart, %s (Grep it, then Read around the match with an offset), recover it, then run "
                    "%s.\n" % (transcript, gap))
     base = (
@@ -158,14 +158,16 @@ def resume_context(record: PendingRecord, checkpoint_text: str, cli: str) -> str
         "<pitstop-checkpoint>\n{text}\n</pitstop-checkpoint>\n\n"
         "Resume:\n"
         "1. Re-read only the files the checkpoint cites that the next action needs. Do not re-explore.\n"
-        "2. Print exactly `{line}` followed by three short lines in the language of the conversation: goal, current state, next action.\n"
-        "3. Continue from the next action.\n"
+        "2. If the checkpoint says `Last reply to the user: NOT SENT`, send that reply first, from Chat-only text, "
+        "before the next action. Never tell the user it was already sent.\n"
+        "3. Print exactly `{line}` followed by three short lines in the language of the conversation: goal, current state, next action.\n"
+        "4. Continue from the next action.\n"
     ).format(k=k(record.context_tokens), path=record.checkpoint, text=checkpoint_text.strip(),
              line=resumed_line(record.context_tokens),
              transcript_line="Transcript before the restart: %s\n" % transcript if transcript else "")
     base += missing
     if record.plan:
-        base += "5. A superpowers plan is being executed: resume the plan `%s` from its ledger with superpowers:subagent-driven-development.\n" % record.plan
+        base += "6. A superpowers plan is being executed: resume the plan `%s` from its ledger with superpowers:subagent-driven-development.\n" % record.plan
     return base
 
 

@@ -1,5 +1,6 @@
 import io
 import json
+import time
 from pathlib import Path
 
 from pitstop.cli import main
@@ -446,6 +447,16 @@ class ReviewBundleTest(CliTestCase):
         self.assertNotEqual(code, 0)
         self.assertFalse(self.layout.reviews_log.exists())
 
+
+    def test_review_done_uses_the_bundle_folder_time(self):
+        self.cli("review-done", "--bundle", "/r/20261110-163603", "--cycles", "1", "--approved", "0",
+                 "--rejected", "0")
+        self.assertEqual(last_review_ts(self.layout), time.mktime(time.strptime("20261110-163603", "%Y%m%d-%H%M%S")))
+
+    def test_review_done_rejects_an_empty_bundle(self):
+        code, _ = self.cli("review-done", "--bundle", " ", "--cycles", "1", "--approved", "0", "--rejected", "0")
+        self.assertNotEqual(code, 0)
+        self.assertFalse(self.layout.reviews_log.exists())
 
 class ConfigCommandTest(CliTestCase):
     def test_config_sets_threshold(self):
