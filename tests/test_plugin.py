@@ -69,6 +69,14 @@ class PluginFilesTest(unittest.TestCase):
         self.assertIn("Last reply to the user:", text)
         self.assertIn("NOT SENT", text)
 
+    def test_skill_sends_an_owed_reply(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        procedure = text.split("## Checkpoint procedure", 1)[1]
+        self.assertTrue(procedure.lstrip().startswith("1. If a reply to the user is owed"))
+        self.assertIn("anything still owed makes it NOT SENT", text)
+        resuming = text.split("## Resuming", 1)[1].split("## Review", 1)[0]
+        self.assertIn("send that reply first", resuming)
+
     def test_skill_has_exact_text_and_assumed_rules(self):
         text = SKILL_PATH.read_text(encoding="utf-8")
         self.assertIn("never as a description", text)
@@ -106,7 +114,7 @@ class ZonesPluginTest(unittest.TestCase):
     def test_versions_are_0_5_0(self):
         for path in (REPO_ROOT / "package.json", REPO_ROOT / ".claude-plugin" / "plugin.json"):
             with self.subTest(path=path.name):
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.5.0")
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.5.1")
 
 
 class ReviewPluginTest(unittest.TestCase):

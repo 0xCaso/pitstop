@@ -374,11 +374,22 @@ def cmd_review_bundle(args: argparse.Namespace, ctx: Ctx) -> None:
                                                        path))
 
 
+def _bundle_time(bundle: str, fallback: float) -> float:
+    """When review-bundle made the folder (its name is the local time), so cycles resumed while the review ran
+    count toward the next review; `fallback` for a name in another format."""
+    try:
+        return time.mktime(time.strptime(Path(bundle).name, "%Y%m%d-%H%M%S"))
+    except (ValueError, OverflowError):
+        return fallback
+
+
 def cmd_review_done(args: argparse.Namespace, ctx: Ctx) -> None:
     counts = (args.cycles, args.approved, args.rejected)
     if min(counts) < 0:
         raise CliError("counts must be 0 or more")
-    append_review(ctx.layout, round(ctx.now, 3), args.bundle, *counts)
+    if not args.bundle.strip():
+        raise CliError("--bundle is empty")
+    append_review(ctx.layout, round(_bundle_time(args.bundle, ctx.now), 3), args.bundle, *counts)
     ctx.say("🔋 **pitstop** · review: %d cycles · %d approved · %d rejected" % counts)
 
 

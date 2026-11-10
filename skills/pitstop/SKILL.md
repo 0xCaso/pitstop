@@ -69,7 +69,9 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
 
 ## Checkpoint procedure
 
-1. Write and register the checkpoint (see "Checkpoint content") in one Bash call, with the text in a quoted
+1. If a reply to the user is owed (results, a status, an answer), write it in this turn before you write
+   the checkpoint. Then the checkpoint says SENT.
+2. Write and register the checkpoint (see "Checkpoint content") in one Bash call, with the text in a quoted
    heredoc so the shell leaves it untouched:
 
    ```bash
@@ -91,8 +93,8 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    the checkpoint to P with the Write tool, then run `pitstop mark-pending --checkpoint P` with the same flags.
    If the write fails or is refused, print `🔋 **pitstop** · failed: checkpoint not written → continuing here`
    and stop the procedure.
-2. Print the last line of its output (`🔋 **pitstop** · done at …`) as a line of its own.
-3. Restart, following mark-pending's `restart:` output line. N is the window from its `resume window: N minutes`
+3. Print the last line of its output (`🔋 **pitstop** · done at …`) as a line of its own.
+4. Restart, following mark-pending's `restart:` output line. N is the window from its `resume window: N minutes`
    line.
    - **`restart: clear`** (terminal). Print, as the last line of your reply:
      `Run /clear, then send any message (for example "resume"): I'll pick up from the checkpoint within N minutes.`
@@ -142,7 +144,7 @@ artifacts and never summarizes them. Text that exists only in the conversation i
 
 ## Goal
 ## Current state
-Last reply to the user: SENT | NOT SENT (if NOT SENT, it goes word for word under Chat-only text)
+Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already in the chat; anything still owed makes it NOT SENT, and the owed text goes word for word under Chat-only text)
 ## Next action
 <one precise action>
 ## Chat-only text
@@ -176,8 +178,9 @@ Last reply to the user: SENT | NOT SENT (if NOT SENT, it goes word for word unde
 ## Resuming
 
 The first message after `/clear` (any text), or the compacted session after `/compact`, arrives with a
-`[pitstop]` checkpoint; follow the steps in that message: re-read only the cited files the next action needs,
-print `🔋 **pitstop** · resumed from <K> · Where we were:` with three short lines (goal, state, next action), then
+`[pitstop]` checkpoint; follow the steps in that message: re-read only the cited files the next action needs;
+if the checkpoint says `Last reply to the user: NOT SENT`, send that reply first, from Chat-only text, before the
+next action, and never tell the user it was already sent; print `🔋 **pitstop** · resumed from <K> · Where we were:` with three short lines (goal, state, next action), then
 continue. If something is missing, look for it in the transcript the message names ("Transcript before the
 restart": Grep it, then Read around the match with an offset), recover it, then run
 `pitstop gap "<what was missing>"`.
