@@ -26,9 +26,10 @@ def sample_size(configured: int, resumed_since: int) -> int:
 
 
 def since_last_review(cycles: List[Cycle], events: List[Dict[str, Any]], since: Optional[float]) -> Tuple[int, int]:
-    """(closed cycles that began at or after `since`, gap events at or after `since`); everything when None."""
+    """(closed cycles at or after `since`, gap events at or after `since`); everything when None. A resumed cycle
+    counts by its resume time, like the review sample; any other closed cycle by its start."""
     def after(ts: Any) -> bool:
         return isinstance(ts, (int, float)) and not isinstance(ts, bool) and (since is None or ts >= since)
-    closed = sum(1 for c in cycles if c.closed and after(cycle_start(c)))
+    closed = sum(1 for c in cycles if c.closed and after(c.resume_ts if c.resume_ts is not None else cycle_start(c)))
     gaps = sum(1 for e in events if e.get("action") == "gap" and after(e.get("ts")))
     return closed, gaps
