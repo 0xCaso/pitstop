@@ -12,7 +12,8 @@ from pitstop.core.paths import Layout
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _FIELDS = ("excluded", "requested_at_tokens", "last_transcript_size", "last_context_tokens",
-           "awaiting_resume_base", "last_error", "cycle_id", "offered_at_tokens")
+           "awaiting_resume_base", "last_error", "cycle_id", "offered_at_tokens", "previous_transcript",
+           "gap_scan_from")
 
 
 @dataclass
@@ -26,6 +27,8 @@ class SessionState:
     last_error: Optional[str] = None
     cycle_id: Optional[str] = None  # the pitstop cycle this segment belongs to (see pitstop.core.build)
     offered_at_tokens: Optional[int] = None  # the soft-zone offer of this segment, if any
+    previous_transcript: Optional[str] = None  # resumed segment: file name of the transcript before the restart
+    gap_scan_from: int = -1  # resumed segment: transcript offset not yet scanned for reads of that transcript
 
 
 def is_safe_session_id(session_id: str) -> bool:
@@ -57,6 +60,8 @@ def _valid(raw: Dict[str, Any]) -> bool:
         and (raw.get("last_error") is None or isinstance(raw.get("last_error"), str))
         and (raw.get("cycle_id") is None or isinstance(raw.get("cycle_id"), str))
         and (raw.get("offered_at_tokens") is None or _is_int(raw.get("offered_at_tokens")))
+        and (raw.get("previous_transcript") is None or isinstance(raw.get("previous_transcript"), str))
+        and _is_int(raw.get("gap_scan_from", -1))
     )
 
 

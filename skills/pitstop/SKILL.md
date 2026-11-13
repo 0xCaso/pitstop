@@ -85,7 +85,10 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    - `--cwd <cwd>` for an automatic pitstop; `--plan <plan path>` when a superpowers plan is being executed.
    - If it exits non-zero because files under "Re-read" were not found, fix those entries and run it once more.
      A `warning: not checked under Re-read` line is only a notice: carry on.
-   - Any other non-zero exit, or a second failure: print `🔋 **pitstop** · failed: <its reason> → continuing here`
+   - If it exits non-zero with `owed reply:`, messages came after your last text to the user: send that reply
+     now (or set the line to NOT SENT with the text under Chat-only text), then run it once more. If no reply is
+     owed, run it again with `--reply-checked`.
+   - Any other non-zero exit (not `owed reply:`), or a second failure: print `🔋 **pitstop** · failed: <its reason> → continuing here`
      and stop the procedure.
 
    Fallback, if the heredoc is refused or a support file must sit next to the checkpoint: run
@@ -161,6 +164,7 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
 ```
 
 - Quote user preferences word for word.
+- A rule on the language of replies or asks goes word for word under User preferences.
 - Cite files as `path:line`; name specs, plans, ledgers and PRs by path or URL.
 - Superpowers: point to spec, plan, ledger and workspace; name the current task and the open decisions. Do not restate them.
 - Chat-only text, never left out: text the next action needs that no file holds (a table or list the user
@@ -170,7 +174,9 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
   none. With `--kind other` (research, writing, strategy) most of the state lives here: fill it first.
 - For --kind other the state lives in the chat: put the tables, lists, figures and sources the next action needs under "Chat-only text" word for word, and when they pass about 1K tokens save them to a support file and cite it.
 - Exact strings the remaining work needs (commands that worked, ids, model names, paths, error text, the option
-  texts of a choice the user made) go word for word, never as a description.
+  texts of a choice the user made) go word for word, never as a description. Commands that the Next action and
+  the remaining steps run again (build, render, screenshot, dev server, migration) go word for word with all
+  their arguments.
 - Mark with `(assumed)` a fact you did not check in a file, a command output or the user's words.
 - Leave out secrets, tokens, passwords and personal data.
 - Write `—` under an empty section.

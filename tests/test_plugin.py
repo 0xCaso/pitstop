@@ -114,7 +114,7 @@ class ZonesPluginTest(unittest.TestCase):
     def test_versions_are_0_5_0(self):
         for path in (REPO_ROOT / "package.json", REPO_ROOT / ".claude-plugin" / "plugin.json"):
             with self.subTest(path=path.name):
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.5.1")
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.5.2")
 
 
 class ReviewPluginTest(unittest.TestCase):

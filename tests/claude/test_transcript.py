@@ -7,6 +7,7 @@ from pitstop.claude.transcript import (
     read_context_tokens,
     read_last_cwd,
     read_session_title,
+    read_unanswered_messages,
 )
 from tests.helpers import TempLayoutTestCase, assistant_line, user_line, write_jsonl
 
@@ -119,3 +120,50 @@ class TitleCwdAndLookupTest(TempLayoutTestCase):
         write_jsonl(projects / "-work-repo" / "abc.jsonl", [user_line()])
         self.assertIsNone(find_transcript("*", projects))
         self.assertIsNone(find_transcript("nope", projects))
+
+
+def said(text):
+    return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def called(name):
+    return {"type": "assistant", "isSidechain": False,
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": name, "input": {}}]}}
+
+
+def tool_result():
+    return {"type": "user", "isSidechain": False,
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]}}
+
+
+class ReadUnansweredMessagesTest(TempLayoutTestCase):
+    def count(self, *entries):
+        return read_unanswered_messages(str(write_jsonl(self.tmp / "t.jsonl", list(entries))))
+
+    def test_user_message_after_the_last_text_is_owed(self):
+        self.assertEqual(self.count(user_line("a"), said("risposta"), user_line("e poi?"), called("Bash"), tool_result()), 1)
+
+    def test_task_notification_counts_as_a_message(self):
+        note = user_line("<task-notification>done</task-notification>")
+        self.assertEqual(self.count(said("parto"), note, note), 2)
+
+    def test_tool_results_alone_owe_nothing(self):
+        self.assertEqual(self.count(user_line(), said("ok"), called("Read"), tool_result(), called("Bash"), tool_result()), 0)
+
+    def test_an_ask_tool_after_the_message_is_the_reply(self):
+        self.assertEqual(self.count(said("ok"), user_line("decidi"), called("mcp__plugin_waggle_waggle__waggle_ask"),
+                                    tool_result(), called("Bash"), tool_result()), 0)
+
+    def test_an_ask_before_the_message_is_not_its_reply(self):
+        self.assertEqual(self.count(said("ok"), called("mcp__plugin_waggle_waggle__waggle_ask"), tool_result(),
+                                    user_line("risposta")), 1)
+
+    def test_meta_and_sidechain_messages_are_ignored(self):
+        meta = dict(user_line("caveat"), isMeta=True)
+        side = dict(user_line("sub"), isSidechain=True)
+        self.assertEqual(self.count(said("ok"), meta, side), 0)
+
+    def test_none_without_text_since_the_compaction(self):
+        boundary = {"type": "system", "subtype": "compact_boundary", "isSidechain": False}
+        self.assertIsNone(self.count(said("prima"), boundary, user_line("riprendi")))
+        self.assertIsNone(self.count(user_line("solo")))

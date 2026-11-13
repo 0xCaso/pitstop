@@ -47,7 +47,8 @@ it skips, and it prints the reason as one of six fixed categories (`debugging`, 
 
 - **A checkpoint can miss things.** Claude writes it, and it points to files instead of copying them. If the
   resumed session lacks something, `/pitstop gap <what was missing>` records it so you can see how often it
-  happens.
+  happens. pitstop also records a gap by itself each time the resumed session searches the transcript from
+  before the restart. And `mark-pending` refuses a checkpoint written while a message still waits for a reply.
 - **macOS only, so far.** The hooks run `/usr/bin/python3` (3.9+, standard library only) and notifications use
   `osascript`. Linux may work but is untested; Windows is not supported.
 - **Built on recent Claude Code.** Checked with 2.1.294. The author's log since September 2026 has 76 resumes after
