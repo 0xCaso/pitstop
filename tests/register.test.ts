@@ -16,7 +16,7 @@ function world(on: On, w: World) {
   on('fs.list', (_$, e) => ({
     value: Object.keys(w.files)
       .filter(p => p.startsWith(`${e.path}/`))
-      .map(p => ({ name: p.slice(e.path.length + 1), kind: 'file' as const, size: 1, mtimeMs: NOW })),
+      .map(p => ({ name: p.slice(e.path.length + 1), kind: 'file' as const, size: 1, mtimeMs: NOW, isLink: false })),
   }))
   on('fs.read', (_$, e) => {
     const text = w.files[e.path]
