@@ -14,6 +14,7 @@ from pitstop.claude import messages
 from pitstop.claude.hooks import run_hook
 from pitstop.claude.report_scan import calls_after, projects_dirs, skip_categories
 from pitstop.claude.review_scan import AFTER_CHARS, BEFORE_CHARS, chat_excerpt
+from pitstop.claude.settings import lowest_auto_compact_window, settings_files
 from pitstop.claude.transcript import (
     read_unanswered_messages,
     TranscriptSchemaError,
@@ -247,6 +248,10 @@ def cmd_status(args: argparse.Namespace, ctx: Ctx) -> None:
     ctx.say("current context: %s · soft %s · threshold %s · hard %s" % (
         _current_context(args, ctx, session), messages.k(config.soft_threshold_tokens),
         messages.k(config.threshold_tokens), messages.k(config.hard_threshold_tokens)))
+    window = lowest_auto_compact_window(settings_files(ctx.projects_dir.parent, args.cwd or os.getcwd()))
+    if window is not None and window[0] < config.threshold_tokens:
+        ctx.say(messages.auto_compact_warning(window[0], str(window[1]), config.threshold_tokens,
+                                              config.hard_threshold_tokens))
     events = read_events(ctx.layout)
     done = sum(1 for e in events if e.get("action") == "pitstop_done")
     gaps = sum(1 for e in events if e.get("action") == "gap")
@@ -438,6 +443,7 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="state, current context and pilot numbers")
     status.add_argument("--session")
     status.add_argument("--transcript")
+    status.add_argument("--cwd", help="project folder whose .claude settings are checked (default: current)")
     sub.add_parser("new-checkpoint", help="print the path for a new checkpoint").add_argument("--session")
     mark = sub.add_parser("mark-pending", help="register a checkpoint for the resume after /clear or /compact")
     source = mark.add_mutually_exclusive_group(required=True)

@@ -24,6 +24,32 @@ trigger and resume sizes are the medians of 142 real pitstops from the author's 
 compares the tokens re-read over the session, the area under each line; it leaves out the checkpoint and the
 files re-read after each resume. The saving in your sessions depends on how they grow.
 
+## pitstop vs auto-compact
+
+Claude Code already compacts on its own: when the context nears the limit, auto-compact replaces the
+conversation with a summary. On 1M-token models that happens at about 967K tokens, so every turn before it
+re-reads a very large context ([Anthropic, Oct 2026](https://x.com/lydiahallie/status/2108624109538291901)).
+Lowering the limit with `/autocompact 400k` fixes the cost: one user's replay of a week of usage estimates 29%
+fewer weekly-limit points at 400K and 41% at 200K
+([source](https://x.com/rohit3a/status/2108277836285161798); his sessions, his estimate).
+
+pitstop pulls the same lever, a smaller context, and changes what happens at the restart:
+
+| | auto-compact | pitstop |
+|---|---|---|
+| **When** | The moment the context hits the limit, mid-task if need be | At the next clean point past the threshold (200K by default); offers one from 170K, requires one past 280K; skips during debugging, fine edits, running subagents |
+| **What survives** | A generic summary of the whole conversation | A checkpoint with fixed sections: goal, state, next action, decisions, the user's preferences word for word, text that lives only in the chat, the files to re-read |
+| **Owed replies** | Not tracked | A checkpoint is refused while a message still waits for a reply |
+| **After the restart** | The summary, and whatever the model remembers to look up | Re-reads only the files the next action needs, prints goal, state and next action |
+| **Did it lose something?** | You cannot tell | Gaps are recorded (by hand, and by themselves when the session searches the old transcript); `/pitstop review` turns repeated gaps into checkpoint rules |
+
+At the same restart point both end up at about the same size (median about 61K tokens in our tests): the token
+saving comes from restarting earlier, and that you can get from either. What pitstop adds is control over what
+survives, and a way to measure it.
+
+pitstop and auto-compact work together: leave auto-compact on as a safety net above pitstop's hard limit (280K).
+`/pitstop status` warns when the auto-compact window is set below the pitstop threshold.
+
 ## What a pitstop looks like
 
 1. The context passes the threshold. pitstop asks Claude to stop at the next clean point. Before that, in the soft
@@ -54,6 +80,29 @@ it skips, and it prints the reason as one of six fixed categories (`debugging`, 
 - **Built on recent Claude Code.** Checked with 2.1.294. The author's log since September 2026 has 76 resumes after
   `/clear` in the terminal and 35 after `/compact` in T3 Code.
 
+## Tested against native compact
+
+We restart the same sessions both ways and compare. Each test cuts a real session's transcript just before a
+pitstop, makes two copies (twins), restarts one with native `/compact` and one with the pitstop checkpoint, and
+sends both the message that really came next. A grader that does not know which twin is which compares their
+first reply with what the real session did.
+
+Latest results (2026-11-10, pitstop 0.5.0, 15 sessions):
+
+| | native compact | pitstop |
+|---|---|---|
+| Better first reply after the restart | 3 | **12** |
+| Next action fully right | 3 / 15 | **9 / 15** |
+| Owed replies dropped | 3 / 12 | **1 / 12** |
+| Wrong claims | 20 | **12** |
+| Missing details | 41 | **30** |
+| Facts lost when asked directly (5 sessions, 40 questions) | 1 / 40 | **0 / 40** |
+| Context after the restart (median) | 61K | 62K |
+
+Limits: 15 sessions, all from the author; the grader is a model; twins have read-only tools and no MCP servers.
+Full results per session, and every later run: [docs/twin-tests.md](docs/twin-tests.md). This table is updated
+after each run.
+
 ## Install
 
 From the plugin marketplace on GitHub, which installs the [`agent-pitstop`](https://www.npmjs.com/package/agent-pitstop)
@@ -78,7 +127,7 @@ Start a new session afterwards. pitstop does not edit your `settings.json`.
 
 | Command | Effect |
 |---|---|
-| `/pitstop status` | On or off, notifications, metrics, current context, threshold, pitstops so far, real resume size, gaps |
+| `/pitstop status` | On or off, notifications, metrics, current context, threshold, pitstops so far, real resume size, gaps, a warning when auto-compact runs before the threshold |
 | `/pitstop on` · `/pitstop off` | Turn pitstop on or off in every session |
 | `/pitstop off here` | Turn it off in the current session only |
 | `/pitstop now` | Checkpoint and restart right away |

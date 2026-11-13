@@ -136,6 +136,12 @@ def batch_request_context(tokens: int, threshold: int, step: int, cwd: str, cli:
     return _request_context(head, mode, tokens, threshold, step, cwd, cli, skill, background_tasks, hard=hard)
 
 
+def auto_compact_warning(window: int, path: str, threshold: int, hard: int) -> str:
+    return ("warning: auto-compact window %s (%s) is below the pitstop threshold %s, so native compact can run "
+            "before the checkpoint. Set it above the hard limit %s, for example /autocompact %dk." % (
+                k(window), path, k(threshold), k(hard), max(400, (hard // 1000 + 99) // 100 * 100)))
+
+
 def owed_reply_reason(unanswered: int) -> str:
     return ("owed reply: %d message(s) reached you after your last text to the user (a user message, a task "
             "result or an answer) and got no reply. Send the reply now, or set `Last reply to the user: NOT SENT` "
