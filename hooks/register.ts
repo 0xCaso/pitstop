@@ -1,8 +1,8 @@
 // Terminal and `claude -p` restart, hands-off: once a turn ends with a checkpoint this session has just registered,
 // run /compact and queue the resume message. The SessionStart hook (source compact) injects the checkpoint.
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
-type Engine = Parameters<Parameters<Parameters<Register>[0]>[1]>[0]
+type Engine = EngineInterface
 
 // Must match COMPACT_SUMMARY in pitstop/claude/messages.py.
 const SUMMARY = 'Resume from the pitstop checkpoint.'
