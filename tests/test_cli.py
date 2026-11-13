@@ -232,7 +232,7 @@ class StatusAndGapTest(CliTestCase):
         log_event(self.layout, "stop", "resume_base", session_id="s1", resume_base=70000)
         log_event(self.layout, "stop", "resume_base", session_id="s1", resume_base=90000)
         self.assertEqual(self.cli("gap", "missing", "the", "ledger"), (0, "🔋 checkpoint gap recorded\n"))
-        code, out = self.cli("status")
+        code, out = self.cli("status", "--cwd", str(self.tmp))
         self.assertEqual(code, 0)
         self.assertEqual(out.splitlines(), [
             "🔋 pitstop: on",
@@ -246,6 +246,20 @@ class StatusAndGapTest(CliTestCase):
         gaps = [json.loads(line) for line in self.layout.gaps.read_text(encoding="utf-8").splitlines()]
         self.assertEqual((gaps[0]["session_id"], gaps[0]["text"]), ("s1", "missing the ledger"))
         self.assertNotIn("ledger", self.layout.log.read_text(encoding="utf-8"))
+
+    def test_status_warns_when_auto_compact_runs_before_the_threshold(self):
+        user = self.tmp / "settings.json"  # the profile folder holds projects/ and settings.json
+        project = self.tmp / "repo"
+        (project / ".claude").mkdir(parents=True)
+        user.write_text(json.dumps({"autoCompactWindow": 400000}), encoding="utf-8")
+        self.assertFalse(any("auto-compact" in line for line in self.cli("status", "--cwd", str(project))[1].splitlines()))
+        local = project / ".claude" / "settings.local.json"
+        local.write_text(json.dumps({"models": {"claude-opus-5-5": {"autoCompactWindow": 150000}}}), encoding="utf-8")
+        out = self.cli("status", "--cwd", str(project))[1]
+        self.assertIn("warning: auto-compact window 150K (%s) is below the pitstop threshold 200K" % local, out)
+        self.assertIn("/autocompact 400k", out)
+        local.write_text(json.dumps({"autoCompactWindow": "auto"}), encoding="utf-8")
+        self.assertNotIn("auto-compact", self.cli("status", "--cwd", str(project))[1])
 
     def test_status_shows_folder(self):
         code, out = self.cli("status")
