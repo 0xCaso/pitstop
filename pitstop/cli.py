@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import statistics
 import sys
 import time
@@ -14,6 +15,7 @@ from pitstop.claude.hooks import run_hook
 from pitstop.claude.report_scan import calls_after, projects_dirs, skip_categories
 from pitstop.claude.review_scan import AFTER_CHARS, BEFORE_CHARS, chat_excerpt
 from pitstop.claude.transcript import (
+    read_unanswered_messages,
     TranscriptSchemaError,
     default_projects_dir,
     find_transcript,
@@ -128,6 +130,9 @@ def cmd_new_checkpoint(args: argparse.Namespace, ctx: Ctx) -> None:
     ctx.say(str(new_checkpoint_path(ctx.layout, _session_id(args, ctx), ctx.now)))
 
 
+OWED_MARK = re.compile(r"Last reply to the user:\s*NOT SENT")
+
+
 def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
     session = _session_id(args, ctx)
     transcript = _transcript(args, ctx, session)
@@ -150,6 +155,14 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         if checkpoint.stat().st_size == 0:
             raise CliError("empty checkpoint: %s" % checkpoint)
         text = checkpoint.read_text(encoding="utf-8", errors="replace")
+    # R-MARK: a message that reached the session after its last text, unanswered, means a reply is owed.
+    if not args.reply_checked and not OWED_MARK.search(text):
+        try:
+            unanswered = read_unanswered_messages(str(transcript))
+        except OSError:
+            unanswered = None
+        if unanswered:
+            raise CliError(messages.owed_reply_reason(unanswered))
     # Checked before anything is written: a checkpoint that cites files the resume cannot find is fixed first.
     stats = analyze_checkpoint(text, cwd, str(ctx.layout.checkpoints_dir))
     if stats.missing:
@@ -433,6 +446,8 @@ def build_parser() -> argparse.ArgumentParser:
     mark.add_argument("--cwd")
     mark.add_argument("--plan")
     mark.add_argument("--kind", choices=["code", "other"], help="code: the work lives in the repo's files")
+    mark.add_argument("--reply-checked", action="store_true",
+                      help="no reply is owed although messages came after the last text to the user")
     mark.add_argument("--session")
     mark.add_argument("--transcript")
     gap = sub.add_parser("gap", help="record something the checkpoint was missing")
