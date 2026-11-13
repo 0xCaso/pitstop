@@ -785,3 +785,61 @@ class ReviewReminderTest(HookTestCase):
         self.layout.log.write_text("garbage\n{\n", encoding="utf-8")
         self.layout.reviews_log.mkdir(parents=True)  # unreadable as a file
         self.assertIsNone(self.message())
+
+
+def tool_call(name, **tool_input):
+    return {"type": "assistant", "isSidechain": False,
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": name,
+                                                          "input": tool_input}]}}
+
+
+class AutoGapHookTest(PendingMixin, HookTestCase):
+    """R-GAP: a resumed session that reads the transcript from before the restart records a gap by itself."""
+
+    def resume(self):
+        self.pending(project_dir="/proj")
+        self.fresh = write_jsonl(self.tmp / "s2.jsonl", [user_line()])
+        self.assertIsNotNone(self.call_hook("user-prompt-submit", session_id="s2", transcript_path=str(self.fresh)))
+
+    def batch(self, *entries):
+        with open(self.fresh, "a", encoding="utf-8") as fh:
+            for entry in entries:
+                fh.write(json.dumps(entry) + "\n")
+        self.call_hook("post-tool-batch", session_id="s2", transcript_path=str(self.fresh), tool_calls=[])
+
+    def gaps(self):
+        try:
+            return [json.loads(line) for line in self.layout.gaps.read_text(encoding="utf-8").splitlines()]
+        except FileNotFoundError:
+            return []
+
+    def test_each_read_of_the_old_transcript_is_a_gap_once(self):
+        self.resume()
+        self.batch(tool_call("Grep", pattern="tabella prezzi", path="/proj/s1.jsonl"), tool_call("Read", file_path="/a.py"))
+        self.batch(tool_call("Read", file_path="/proj/s1.jsonl", offset=120))
+        gaps = self.gaps()
+        self.assertEqual([g["source"] for g in gaps], ["auto", "auto"])
+        self.assertIn("tabella prezzi", gaps[0]["text"])
+        self.assertEqual(len([e for e in read_events(self.layout) if e["action"] == "gap"]), 2)
+
+    def test_other_tool_calls_and_sessions_without_resume_record_nothing(self):
+        self.resume()
+        self.batch(tool_call("Read", file_path="/a.py"), tool_call("Bash", command="ls /proj"))
+        self.batch(dict(tool_call("Read", file_path="/proj/s1.jsonl"), isSidechain=True))
+        self.add_turn(1000)
+        with open(self.transcript, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(tool_call("Read", file_path="/proj/s1.jsonl")) + "\n")
+        self.call_hook("post-tool-batch", tool_calls=[])
+        self.assertEqual(self.gaps(), [])
+
+    def test_a_compacted_session_skips_what_was_written_before_the_resume(self):
+        with open(self.transcript, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(tool_call("Read", file_path="/proj/s1.jsonl")) + "\n")
+        self.pending(project_dir="/proj")
+        self.assertIsNotNone(self.call_hook("session-start", source="compact"))
+        self.call_hook("post-tool-batch", tool_calls=[])
+        self.assertEqual(self.gaps(), [])
+        with open(self.transcript, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(tool_call("Grep", pattern="x", path="/proj/s1.jsonl")) + "\n")
+        self.call_hook("post-tool-batch", tool_calls=[])
+        self.assertEqual(len(self.gaps()), 1)

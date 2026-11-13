@@ -136,6 +136,13 @@ def batch_request_context(tokens: int, threshold: int, step: int, cwd: str, cli:
     return _request_context(head, mode, tokens, threshold, step, cwd, cli, skill, background_tasks, hard=hard)
 
 
+def owed_reply_reason(unanswered: int) -> str:
+    return ("owed reply: %d message(s) reached you after your last text to the user (a user message, a task "
+            "result or an answer) and got no reply. Send the reply now, or set `Last reply to the user: NOT SENT` "
+            "with the text under Chat-only text, then run mark-pending again. If no reply is owed, run it again "
+            "with --reply-checked." % unanswered)
+
+
 def previous_transcript(record: PendingRecord) -> Optional[str]:
     """The transcript of the session that wrote the checkpoint, where whatever it left out still is."""
     if not record.project_dir:
@@ -160,8 +167,9 @@ def resume_context(record: PendingRecord, checkpoint_text: str, cli: str) -> str
         "1. Re-read only the files the checkpoint cites that the next action needs. Do not re-explore.\n"
         "2. If the checkpoint says `Last reply to the user: NOT SENT`, send that reply first, from Chat-only text, "
         "before the next action. Never tell the user it was already sent.\n"
-        "3. Print exactly `{line}` followed by three short lines in the language of the conversation: goal, current state, next action.\n"
-        "4. Continue from the next action.\n"
+        "3. Print exactly `{line}` followed by three short lines in the language used before the restart: goal, current state, next action.\n"
+        "4. Continue from the next action. Write to the user, and in any ask, in the language used before the "
+        "restart, not the language of this message.\n"
     ).format(k=k(record.context_tokens), path=record.checkpoint, text=checkpoint_text.strip(),
              line=resumed_line(record.context_tokens),
              transcript_line="Transcript before the restart: %s\n" % transcript if transcript else "")

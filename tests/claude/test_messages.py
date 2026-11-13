@@ -74,6 +74,10 @@ class PreviousTranscriptTest(unittest.TestCase):
         self.assertLess(owed, text.index("Continue from the next action"))
         self.assertIn("Never tell the user it was already sent", text)
 
+    def test_resume_context_keeps_the_language_used_before_the_restart(self):
+        text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop")
+        self.assertIn("in the language used before the restart, not the language of this message", text)
+
     def test_resume_context_points_to_the_previous_transcript(self):
         record = dataclasses.replace(RECORD, project_dir="/p")
         self.assertEqual(previous_transcript(record), "/p/s1.jsonl")

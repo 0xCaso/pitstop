@@ -1,4 +1,5 @@
 """Hook handlers: glue between Claude Code events and the pitstop core. Every error fails open."""
+import json
 import os
 import re
 import subprocess
@@ -10,11 +11,11 @@ from typing import Callable, List, Optional
 from pitstop.claude import messages
 from pitstop.claude.hookio import HookInput, HookInputError, build_output, parse_hook_input
 from pitstop.claude.notify import notify
-from pitstop.claude.transcript import TranscriptSchemaError, read_context_tokens
+from pitstop.claude.transcript import TranscriptSchemaError, read_context_tokens, read_tool_inputs_naming
 from pitstop.core.build import new_cycle_id
 from pitstop.core.config import Config, load_config, should_show_config_notice
 from pitstop.core.decide import HARD, OFFER, REQUEST, Event, decide, segment_start
-from pitstop.core.fsutil import LockTimeout, atomic_write_text, file_lock
+from pitstop.core.fsutil import LockTimeout, append_line, atomic_write_text, file_lock
 from pitstop.core.cycles import build_cycles
 from pitstop.core.log import log_event, read_events
 from pitstop.core.paths import Layout
@@ -224,6 +225,8 @@ def _handle_post_tool_batch(inp: HookInput, layout: Layout, notifier: Notifier, 
             state.last_context_tokens = _context_tokens(layout, state, "post_tool_batch", inp.transcript_path)
         tokens = state.last_context_tokens
         _maybe_log_resume_base(layout, state, "post_tool_batch", inp.session_id, tokens)
+        if state.previous_transcript:
+            _record_auto_gaps(inp, layout, state, now)
         segment_start(config, state, tokens)
         action = decide(config, state, Event("post_tool_batch", tokens)).action
         if action == HARD and _checkpoint_waiting(layout, inp.session_id, now, config):
@@ -232,6 +235,20 @@ def _handle_post_tool_batch(inp: HookInput, layout: Layout, notifier: Notifier, 
             return None  # OFFER is Stop-only: decide() never returns it here
         cycle_id = _open_request(state, tokens)
     return _request(inp, layout, notifier, config, tokens, "post_tool_batch", None, cycle_id, hard=action == HARD)
+
+
+def _record_auto_gaps(inp: HookInput, layout: Layout, state: SessionState, now: float) -> None:
+    """A resumed session that reads the transcript from before the restart is looking for something the
+    checkpoint left out: record a gap for each such tool call. Scans only what was written since last time."""
+    try:
+        found, state.gap_scan_from = read_tool_inputs_naming(inp.transcript_path, max(state.gap_scan_from, 0),
+                                                             state.previous_transcript)
+        for text in found:
+            entry = {"ts": round(now, 3), "session_id": inp.session_id, "source": "auto", "text": text[:200]}
+            append_line(layout.gaps, json.dumps(entry, ensure_ascii=False))
+            log_event(layout, "post_tool_batch", "gap", session_id=inp.session_id, cycle_id=state.cycle_id)
+    except OSError:
+        pass  # a missed automatic gap never breaks the hook
 
 
 def _is_fresh_session(transcript_path: str) -> bool:
@@ -401,6 +418,12 @@ def _resume(inp: HookInput, layout: Layout, notifier: Notifier, config: Config, 
             state.last_context_tokens = None
             state.last_error = None
             state.cycle_id = record.cycle_id  # resume_base and gaps of this segment belong to that cycle
+            previous = messages.previous_transcript(record)
+            state.previous_transcript = os.path.basename(previous) if previous else None
+            try:
+                state.gap_scan_from = os.path.getsize(inp.transcript_path)  # compacted: same file, skip the past
+            except OSError:
+                state.gap_scan_from = 0  # after /clear the new transcript may not exist yet
     except (LockTimeout, OSError) as exc:
         # The checkpoint is still readable even if the fresh session's state could not be reset:
         # resume_base tracking for the new segment is lost, but the resume itself must not be.
