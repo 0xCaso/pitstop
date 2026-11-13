@@ -2,13 +2,16 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterator, Mapping, Optional
+from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 
 from pitstop.core.state import is_safe_session_id
 
 BLOCK_SIZE = 64 * 1024
 MAX_SCAN_BYTES = 16 * 1024 * 1024
 USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+
+
+MAX_GAP_SCAN_BYTES = 4 * 1024 * 1024
 
 
 class TranscriptSchemaError(Exception):
@@ -129,3 +132,84 @@ def find_transcript(session_id: str, projects_dir: Path) -> Optional[Path]:
     if not matches:
         return None
     return max(matches, key=lambda p: p.stat().st_mtime)
+
+
+_REPLY_TOOLS = ("waggle_ask", "waggle_update", "knock_ask", "knock_update")
+
+
+def _blocks(message: Any) -> list:
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def _has_text(blocks: list) -> bool:
+    return any(b.get("type") == "text" and str(b.get("text", "")).strip() for b in blocks)
+
+
+def read_unanswered_messages(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Optional[int]:
+    """How many user or task messages reached the main thread after its last text to the user, when none
+    was answered since: the last one came after any reply sent through an ask tool (Waggle).
+
+    0 means nothing is owed by this measure. None when no text to the user is found since the last
+    compaction. Tool results alone do not count: reading files to write a checkpoint is normal."""
+    messages_after = 0
+    replied = False  # a reply tool was called after the latest message
+    for line in _lines_from_end(transcript_path, max_bytes):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("isSidechain") is True:
+            continue
+        kind = entry.get("type")
+        if kind == "system" and entry.get("subtype") == "compact_boundary":
+            return None
+        blocks = _blocks(entry.get("message"))
+        if kind == "assistant":
+            if _has_text(blocks):
+                return messages_after
+            if messages_after == 0 and any(b.get("type") == "tool_use" and str(b.get("name", "")).endswith(_REPLY_TOOLS)
+                                           for b in blocks):
+                replied = True
+        elif kind == "user" and entry.get("isMeta") is not True:
+            if any(b.get("type") == "tool_result" for b in blocks) or not _has_text(blocks):
+                continue
+            if messages_after == 0 and replied:
+                return 0
+            messages_after += 1
+    return None
+
+
+def read_tool_inputs_naming(transcript_path: str, start: int, needle: str,
+                            max_bytes: int = MAX_GAP_SCAN_BYTES) -> Tuple[list, int]:
+    """Inputs of main-thread tool calls written from offset start on that contain needle, as compact JSON,
+    and the offset to start from next time (after the last complete line). Past max_bytes, older lines
+    are skipped."""
+    found = []
+    with open(transcript_path, "rb") as fh:
+        size = os.fstat(fh.fileno()).st_size
+        if size <= start:
+            return found, size
+        start = max(start, size - max_bytes)
+        fh.seek(start)
+        chunk = fh.read(size - start)
+    end = chunk.rfind(b"\n") + 1
+    encoded = needle.encode("utf-8")
+    for line in chunk[:end].split(b"\n"):
+        if encoded not in line or b'"tool_use"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "assistant" or entry.get("isSidechain") is True:
+            continue
+        for block in _blocks(entry.get("message")):
+            if block.get("type") != "tool_use":
+                continue
+            text = json.dumps(block.get("input"), ensure_ascii=False, separators=(",", ":"))
+            if needle in text:
+                found.append(text)
+    return found, start + end
