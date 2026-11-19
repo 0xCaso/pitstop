@@ -86,3 +86,15 @@ class SummaryTest(TempLayoutTestCase):
                 row("g3", v="0.5.2", gaps=0), row("g4", v="0.5.2", gaps=0)]
         append_rows(self.layout, rows)
         self.assertIn("gaps 50 per 100 resumes", summary(load_rows(self.layout))[0])
+
+    def test_t3_delegates_get_their_own_line(self):
+        from pitstop.core.metrics import summary
+        rows = [row("m1", v="0.5.3", session_kind="main"), row("m2", v="0.5.3", session_kind="main"),
+                row("m3", v="0.5.3", session_kind="main", outcome="skipped"),
+                row("d1", v="0.5.3", session_kind="delegate"), row("d2", v="0.5.3", session_kind="delegate",
+                                                                      outcome="skipped"),
+                row("o1", v="0.5.2")]
+        append_rows(self.layout, rows)
+        lines = summary(load_rows(self.layout))
+        self.assertIn("  sessions: main 3 · resumed 67% · T3 delegate 2 · resumed 50%", lines)
+        self.assertEqual(sum("sessions:" in line for line in lines), 1)  # 0.5.2 rows carry no session kind

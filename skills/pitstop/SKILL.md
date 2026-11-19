@@ -166,6 +166,7 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
 - Quote user preferences word for word.
 - A rule on the language of replies or asks goes word for word under User preferences.
 - Cite files as `path:line`; name specs, plans, ledgers and PRs by path or URL.
+- A feedback ledger (`docs/feedback/*.md`) with open ids always goes under Re-read, with its open ids; feedback that is only in the chat goes into the ledger before the checkpoint.
 - Superpowers: point to spec, plan, ledger and workspace; name the current task and the open decisions. Do not restate them.
 - Chat-only text, never left out: text the next action needs that no file holds (a table or list the user
   pasted, figures, sources or examples given in chat, your last answer when the next action builds on it) goes

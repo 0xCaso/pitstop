@@ -11,7 +11,8 @@ from typing import Callable, List, Optional
 from pitstop.claude import messages
 from pitstop.claude.hookio import HookInput, HookInputError, build_output, parse_hook_input
 from pitstop.claude.notify import notify
-from pitstop.claude.transcript import TranscriptSchemaError, read_context_tokens, read_tool_inputs_naming
+from pitstop.claude.transcript import (TranscriptSchemaError, read_context_tokens, read_is_t3_delegate,
+                                       read_tool_inputs_naming)
 from pitstop.core.build import new_cycle_id
 from pitstop.core.config import Config, load_config, should_show_config_notice
 from pitstop.core.decide import HARD, OFFER, REQUEST, Event, decide, segment_start
@@ -134,11 +135,16 @@ def _checkpoint_waiting(layout: Layout, session_id: str, now: float, config: Con
     return has_session_pending(layout, session_id, now, config.resume_window_minutes)
 
 
+def _session_kind(transcript_path: str) -> str:
+    return "delegate" if read_is_t3_delegate(transcript_path) else "main"
+
+
 def _offer(inp: HookInput, layout: Layout, config: Config, tokens: int, cycle_id: str) -> str:
     """Soft zone: a quiet offer at the end of a turn. No banner and no notification: the user sees something only
     if Claude takes it."""
     log_event(layout, "stop", "offer", session_id=inp.session_id, context_tokens=tokens,
-              threshold=config.soft_threshold_tokens, cycle_id=cycle_id, host=host())
+              threshold=config.soft_threshold_tokens, cycle_id=cycle_id, host=host(),
+              session_kind=_session_kind(inp.transcript_path))
     context = messages.offer_context(tokens, config.soft_threshold_tokens, config.threshold_tokens, inp.cwd,
                                      str(CLI_PATH), str(SKILL_PATH), inp.background_tasks)
     return build_output("Stop", additional_context=context)
@@ -149,7 +155,8 @@ def _request(inp: HookInput, layout: Layout, notifier: Notifier, config: Config,
     output_event, build_context = _REQUESTS[log_name]
     limit = config.hard_threshold_tokens if hard else config.threshold_tokens
     log_event(layout, log_name, "request", session_id=inp.session_id, context_tokens=tokens, threshold=limit,
-              zone="hard" if hard else "threshold", cycle_id=cycle_id, host=host())
+              zone="hard" if hard else "threshold", cycle_id=cycle_id, host=host(),
+              session_kind=_session_kind(inp.transcript_path))
     if config.notify:
         _safe_notify(notifier, messages.notify_triggered(tokens))
     if not hard:
