@@ -18,7 +18,7 @@ SKIP_KEYS = SKIP_CATEGORIES + ("unparsed",)
 ROW_FIELDS = frozenset(
     {"cycle_id", "v", "skill", "host", "kind", "first_request_ts", "request_tokens", "requests", "last_request_ts",
      "done_ts", "done_tokens", "restart", "resume_ts", "resume_base", "gaps", "dropped", "expired", "outcome",
-     "post_calls", "reduction", "first_offer_ts", "offers", "hard_requests"}
+     "post_calls", "reduction", "first_offer_ts", "offers", "hard_requests", "session_kind"}
 )
 _SCALARS = (str, int, float, bool)
 EMPTY = "—"
@@ -160,6 +160,14 @@ def _summary_line(version: str, rows: List[Dict[str, Any]]) -> List[str]:
     if offered or hard:
         accepted = [row for row in offered if not row.get("requests") and row.get("done_ts") is not None]
         lines.append("  zones: offers accepted %d/%d · hard %d" % (len(accepted), len(offered), len(hard)))
+    # T3 delegates (sub-agent sessions) often end soon after the request and skip by design: shown apart (0.5.3+).
+    main = [row for row in rows if row.get("session_kind") == "main"]
+    delegates = [row for row in rows if row.get("session_kind") == "delegate"]
+    if main or delegates:
+        def resumed_share(group):
+            return _percent(sum(row.get("outcome") == "resumed" for row in group), len(group))
+        lines.append("  sessions: main %d · resumed %s · T3 delegate %d · resumed %s" % (
+            len(main), resumed_share(main), len(delegates), resumed_share(delegates)))
     kinds: Dict[str, int] = {}
     for row in rows:
         kind = row.get("kind") if isinstance(row.get("kind"), str) else "unknown"
