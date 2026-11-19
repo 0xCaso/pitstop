@@ -140,7 +140,8 @@ def _percent(part: float, whole: int) -> str:
 def _summary_line(version: str, rows: List[Dict[str, Any]]) -> List[str]:
     resumed = [row for row in rows if row.get("outcome") == "resumed"]
     reductions = [row["reduction"] for row in rows if isinstance(row.get("reduction"), (int, float))]
-    with_gaps = [row["gaps"] for row in resumed if _int(row.get("gaps")) is not None]
+    # A resume that read the old transcript counts once, however many reads it made (R-GAP logs each read).
+    with_gaps = [min(row["gaps"], 1) for row in resumed if _int(row.get("gaps")) is not None]
     chat = [row["checkpoint"]["chat_text_filled"] for row in rows
             if isinstance(row.get("checkpoint"), dict) and _int(row["checkpoint"].get("chat_text_filled")) is not None]
     median = "%d%%" % round(100 * statistics.median(reductions)) if reductions else EMPTY
