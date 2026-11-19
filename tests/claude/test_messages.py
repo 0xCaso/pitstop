@@ -97,7 +97,7 @@ class ZoneMessagesTest(unittest.TestCase):
         text = offer_context(175000, 170000, 200000, "/w", "/cli", "/skill")
         self.assertTrue(text.startswith(
             "[pitstop] Main-thread context is 175K, in the soft zone (170K–200K). Pitstop only if the work is at a "
-            "natural boundary right now; otherwise carry on and print nothing.\n"))
+            "natural boundary right now and more work is left; otherwise carry on and print nothing.\n"))
         self.assertIn("- mode: offer\n", text)
         self.assertIn("- cwd: /w\n", text)
 
