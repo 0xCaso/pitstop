@@ -7,7 +7,7 @@ from pitstop.core.state import SessionState
 
 NOOP = "noop"
 REQUEST = "request"
-OFFER = "offer"  # soft zone: pitstop only at a natural boundary; not a request
+OFFER = "offer"  # soft zone: pitstop only at a natural boundary with work left; not a request
 HARD = "hard"  # past the hard limit: pitstop required
 
 
