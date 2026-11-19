@@ -102,7 +102,7 @@ def _request_context(head: str, mode: str, tokens: int, threshold: int, step: in
 def offer_context(tokens: int, soft: int, threshold: int, cwd: str, cli: str, skill: str,
                   background_tasks: Optional[int] = None) -> str:
     head = ("[pitstop] Main-thread context is {k}, in the soft zone ({soft}–{threshold}). Pitstop only if the work "
-            "is at a natural boundary right now; otherwise carry on and print nothing.\n")
+            "is at a natural boundary right now and more work is left; otherwise carry on and print nothing.\n")
     return _request_context(head, "offer", tokens, threshold, 0, cwd, cli, skill, background_tasks,
                             skip="if you carry on, the request comes at the {threshold} threshold", soft=soft)
 

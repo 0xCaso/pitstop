@@ -53,7 +53,8 @@ pitstop and auto-compact work together: leave auto-compact on as a safety net ab
 ## What a pitstop looks like
 
 1. The context passes the threshold. pitstop asks Claude to stop at the next clean point. Before that, in the soft
-   zone, it offers a pitstop once at the end of a turn, taken only at a natural boundary. Past the hard limit it
+   zone, it offers a pitstop once at the end of a turn, taken only at a natural boundary with work still left (when the
+   work is done and nothing is pending, it skips). Past the hard limit it
    asks at the end of every turn, and Claude skips only while subagents or background tasks are running.
 2. Claude writes the checkpoint and prints `🔋 pitstop · done at 226K → back on track with a clean context`.
 3. The session restarts:

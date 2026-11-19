@@ -45,7 +45,7 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
 
 1. **When.** Mode `conversation`: now. Mode `superpowers`: finish the current step up to the boundary named in
    the message, then come back here before starting anything new.
-   - `mode: offer` (the soft zone, before the threshold): Pitstop only at a natural boundary (a task done, a commit made, an answer finished). Otherwise carry on and print nothing: an offer is not a request and needs no skip line.
+   - `mode: offer` (the soft zone, before the threshold): Pitstop only at a natural boundary (a task done, a commit made, an answer finished) and only if more work is left. If the Next action would be "nothing pending" or "wait for the user", carry on and print nothing: an offer is not a request and needs no skip line, and the hard request still comes if the session goes on.
    - `mode: hard` (past the hard limit): No exceptions except [background-tasks]. Run the "Checkpoint procedure" now.
      If subagents or background tasks are running, skip with category `background-tasks`; the request comes back.
 2. **Exceptions** (modes `conversation` and `superpowers`). Skip the pitstop when any of these applies (its
