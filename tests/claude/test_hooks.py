@@ -195,6 +195,13 @@ class StopHookTest(PendingMixin, HookTestCase):
         requests = [e for e in read_events(self.layout) if e["action"] == "request"]
         self.assertEqual([(r["zone"], r["threshold"]) for r in requests], [("threshold", 200000), ("hard", 280000)])
 
+    def test_request_logs_session_kind(self):
+        self.transcript = write_jsonl(self.tmp / "d.jsonl", [user_line("Act as the test sub-agent for this task.")])
+        self.add_turn(212345)
+        self.call_hook("stop")
+        requests = [e for e in read_events(self.layout) if e["action"] == "request"]
+        self.assertEqual([r["session_kind"] for r in requests], ["delegate"])
+
     def test_invalid_config_shows_one_banner(self):
         self.layout.base.mkdir(parents=True, exist_ok=True)
         self.layout.config.write_text('{"threshold_tokens": 1}', encoding="utf-8")

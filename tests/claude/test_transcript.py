@@ -167,3 +167,15 @@ class ReadUnansweredMessagesTest(TempLayoutTestCase):
         boundary = {"type": "system", "subtype": "compact_boundary", "isSidechain": False}
         self.assertIsNone(self.count(said("prima"), boundary, user_line("riprendi")))
         self.assertIsNone(self.count(user_line("solo")))
+
+
+class DelegateSessionTest(TempLayoutTestCase):
+    def test_t3_delegate_is_known_by_its_first_prompt(self):
+        from pitstop.claude.transcript import read_is_t3_delegate
+        delegate = write_jsonl(self.tmp / "d.jsonl", [user_line("Act as the implementation sub-agent for this task.\n\nRepo x"),
+                                                     assistant_line(message_id="m1", input_tokens=10)])
+        main = write_jsonl(self.tmp / "m.jsonl", [user_line("Analizza le mie sessioni"),
+                                                 user_line("Act as the test sub-agent for this task.")])
+        self.assertTrue(read_is_t3_delegate(str(delegate)))
+        self.assertFalse(read_is_t3_delegate(str(main)))
+        self.assertFalse(read_is_t3_delegate(str(self.tmp / "missing.jsonl")))

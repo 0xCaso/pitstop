@@ -15,6 +15,7 @@ class Cycle:
     host: Optional[str] = None
     session: Optional[str] = None  # the session that was asked for the pitstop (or made it)
     kind: Optional[str] = None
+    session_kind: Optional[str] = None  # "main" or "delegate" (a T3 sub-agent session), from 0.5.3
     first_offer_ts: Optional[float] = None
     offers: int = 0  # soft-zone offers (0.3+)
     first_request_ts: Optional[float] = None
@@ -49,6 +50,9 @@ def _apply(cycle: Cycle, event: Dict[str, Any]) -> None:
     if (cycle.session is None and action in ("offer", "request", "pitstop_done")
             and isinstance(event.get("session_id"), str)):
         cycle.session = event["session_id"]
+    if (cycle.session_kind is None and action in ("offer", "request")
+            and isinstance(event.get("session_kind"), str)):
+        cycle.session_kind = event["session_kind"]
     if action == "offer":
         cycle.offers += 1
         if cycle.first_offer_ts is None:
