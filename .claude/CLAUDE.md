@@ -5,6 +5,7 @@
 
 # Twin tests
 
+- Run every check and twin test with the wer-team account: `CLAUDE_CONFIG_DIR=~/.claude-wer-team` on each `claude -p` (Matteo, 2026-11-19).
 - After a twin test run, add it to `docs/twin-tests.md` and update the README table ("Tested against native compact").
 
 # Releases
