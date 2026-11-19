@@ -1,6 +1,7 @@
 """What pitstop reads from a Claude Code transcript (JSONL): context size, title, cwd."""
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 
@@ -101,6 +102,29 @@ def read_session_title(transcript_path: str) -> Optional[str]:
                 generated = entry["aiTitle"]
     title = (custom or generated or "").strip()
     return title or None
+
+
+_T3_DELEGATE = re.compile(r"Act as the [\w -]+ sub-agent for this task\.")
+
+
+def read_is_t3_delegate(transcript_path: str, max_lines: int = 50) -> bool:
+    """True when the session's first user prompt is the one T3's delegate_task sends to a sub-agent."""
+    try:
+        with open(transcript_path, "rb") as fh:
+            for _, line in zip(range(max_lines), fh):
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isMeta") is True:
+                    continue
+                text = next((str(b.get("text", "")) for b in _blocks(entry.get("message"))
+                             if b.get("type") == "text"), "")
+                if text.strip():
+                    return _T3_DELEGATE.match(text.lstrip()) is not None
+    except OSError:
+        pass
+    return False
 
 
 def read_last_cwd(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Optional[str]:

@@ -129,3 +129,7 @@ class ZoneCyclesTest(unittest.TestCase):
         from pitstop.core.cycles import next_start
         cycles = build_cycles([OFFER, ev("request", T, context_tokens=212000)], T + 10)
         self.assertEqual(next_start(cycles, "s1", T - 700), T - 600)
+
+    def test_session_kind_comes_from_the_first_offer_or_request(self):
+        cycle = self.one([ev("request", T, session_kind="delegate"), ev("request", T + 30, session_kind="main")], T + 120)
+        self.assertEqual(cycle.session_kind, "delegate")
