@@ -78,3 +78,11 @@ class SummaryTest(TempLayoutTestCase):
         lines = summary(load_rows(self.layout))
         self.assertIn("  zones: offers accepted 1/3 · hard 1", lines)
         self.assertEqual(sum("zones:" in line for line in lines), 1)  # 0.2.1 had no offers and no hard limit
+
+    def test_gaps_count_resumes_that_needed_the_old_transcript_not_each_read(self):
+        from pitstop.core.metrics import summary
+        # One resume read the old transcript 30 times, one twice, two not at all: 2 of 4 resumes had a gap.
+        rows = [row("g1", v="0.5.2", gaps=30), row("g2", v="0.5.2", gaps=2),
+                row("g3", v="0.5.2", gaps=0), row("g4", v="0.5.2", gaps=0)]
+        append_rows(self.layout, rows)
+        self.assertIn("gaps 50 per 100 resumes", summary(load_rows(self.layout))[0])
