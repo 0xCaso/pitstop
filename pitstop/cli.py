@@ -25,7 +25,7 @@ from pitstop.claude.transcript import (
     read_session_title,
 )
 from pitstop.core.build import new_cycle_id
-from pitstop.core.checkpoint import analyze_checkpoint
+from pitstop.core.checkpoint import analyze_checkpoint, incomplete_case_ids, next_action_empty
 from pitstop.core.config import _INT_RANGES, ConfigError, load_config, update_config
 from pitstop.core.cycles import Cycle, build_cycles, next_start
 from pitstop.core.fsutil import append_line, atomic_write_text
@@ -165,6 +165,11 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
             event = None
         if event:
             raise CliError(messages.owed_reply_reason(event))
+    bad_ids = incomplete_case_ids(text)
+    if bad_ids:
+        raise CliError(messages.incomplete_case_ids_reason(bad_ids))
+    if next_action_empty(text):
+        raise CliError(messages.NEXT_ACTION_EMPTY)
     # Checked before anything is written: a checkpoint that cites files the resume cannot find is fixed first.
     stats = analyze_checkpoint(text, cwd, str(ctx.layout.checkpoints_dir))
     if stats.missing:

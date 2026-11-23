@@ -6,8 +6,9 @@ from typing import Dict, List, Tuple
 
 CHAT_TEXT = "Chat-only text"
 REREAD = "Re-read"
+NEXT_ACTION = "Next action"
 # The section titles of the checkpoint template in SKILL.md, in English in every language.
-TEMPLATE_TITLES = frozenset({"Goal", "Current state", "Next action", CHAT_TEXT, "Decisions made", "User preferences",
+TEMPLATE_TITLES = frozenset({"Goal", "Current state", NEXT_ACTION, CHAT_TEXT, "Decisions made", "User preferences",
                              REREAD, "Unsaved or uncommitted work", "Open questions", "Suggested skills"})
 # Titles the template had before (0.5.0 dropped "Discarded"): old checkpoints still split and count the same.
 LEGACY_TITLES = frozenset({"Discarded"})
@@ -18,6 +19,11 @@ _BACKTICKS = re.compile(r"`([^`]+)`")
 _SEPARATOR = re.compile(r"^\s*(,|;|&|\band\b|\be\b)?\s*")
 _LINE_SUFFIX = re.compile(r":\d+(-\d+)?$")
 _PATTERN_CHARS = set("*?{}[]<>")
+# A Waggle case id: c_ plus a full uuid. A shorter one cannot be found again after the restart.
+_CASE_TOKEN = re.compile(r"(?<![\w-])c_[0-9a-f]{6,}(?:-[0-9a-f]+)*(?![\w-])")
+# How done work reads in real checkpoints: "Nothing pending: wait for …", "Nessuna. Aspettare Matteo." (2026-11).
+_NOTHING_LEFT = re.compile(r"^(?:nothing pending|none|nessuna|niente)\b(?![ \t]+\w)", re.IGNORECASE)
+_CASE_ID = re.compile(r"c_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 @dataclass(frozen=True)
@@ -127,3 +133,27 @@ def analyze_checkpoint(text: str, cwd: str, support_dir: str) -> CheckpointStats
         missing=missing,
         unchecked=unchecked,
     )
+
+
+def section(text: str, title: str) -> str:
+    """The body of one checkpoint section, or "" when it is missing."""
+    return _sections(text).get(title, "")
+
+
+def incomplete_case_ids(text: str) -> List[str]:
+    """Waggle case ids in the checkpoint that are not c_ plus a full uuid, each once, in order."""
+    bad: List[str] = []
+    for token in _CASE_TOKEN.findall(text):
+        if not _CASE_ID.fullmatch(token) and token not in bad:
+            bad.append(token)
+    return bad
+
+
+def next_action_empty(text: str) -> bool:
+    """True when the checkpoint has a Next action section with nothing in it, only —, or "Nothing pending" /
+    "None" / "Nessuna" / "Niente" as its first words: the work is done."""
+    sections = _sections(text)
+    if NEXT_ACTION not in sections:
+        return False
+    body = sections[NEXT_ACTION].strip().lstrip("-* ").strip()
+    return not _filled(body) or bool(_NOTHING_LEFT.match(body))

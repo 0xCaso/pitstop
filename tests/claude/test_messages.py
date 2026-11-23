@@ -78,6 +78,31 @@ class PreviousTranscriptTest(unittest.TestCase):
         text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop")
         self.assertIn("in the language used before the restart, not the language of this message", text)
 
+    def test_resume_context_names_the_language_from_user_preferences(self):
+        # Resumed sessions switched to English with an Italian rule in the checkpoint (setup review 2026-11-16, T4).
+        cp = "# cp\n## User preferences\n- \"Code and commits always in English.\"\n- \"Reply in Italian.\"\n## Re-read\n—\n"
+        text = resume_context(RECORD, cp, cli="/x/bin/pitstop")
+        step3 = text.split("\n3. ", 1)[1].split("\n", 1)[0]
+        step4 = text.split("\n4. ", 1)[1].split("\n", 1)[0]
+        for step in (step3, step4):
+            self.assertIn("in Italian (the language used before the restart), in chat and in every ask", step)
+        self.assertNotIn("in English (the language", text)
+
+    def test_resume_context_reads_an_italian_wording_of_the_rule(self):
+        for rule in ("rispondi sempre in italiano", "Italiano in chat; Waggle in ASD-STE100", "Waggle in italiano"):
+            with self.subTest(rule=rule):
+                cp = "# cp\n## User preferences\n- %s\n" % rule
+                self.assertIn("in Italian (the language used before the restart)", resume_context(RECORD, cp, cli="/x"))
+        cp = "# cp\n## User preferences\n- Code, commits and PRs always in English.\n"
+        self.assertIn("in the language used before the restart, not the language", resume_context(RECORD, cp, cli="/x"))
+
+    def test_resume_context_of_a_delegate_has_no_banner(self):
+        # F4 (docs/feedback/2026-11-23-pitstop-quando-non-partire.md): the parent got the banner, not the report.
+        text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop", delegate=True)
+        self.assertNotIn("resumed from 212K", text)
+        self.assertIn("sub-agent", text)
+        self.assertIn("goes back to the thread that delegated you", text)
+
     def test_resume_context_points_to_the_previous_transcript(self):
         record = dataclasses.replace(RECORD, project_dir="/p")
         self.assertEqual(previous_transcript(record), "/p/s1.jsonl")

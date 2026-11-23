@@ -241,6 +241,30 @@ class MarkPendingTest(CliTestCase):
         code, _ = self.cli("mark-pending", "--stdin", stdin_text="# cp\nLast reply to the user: NOT SENT\n")
         self.assertEqual(code, 0)
 
+    def test_incomplete_waggle_case_id_is_refused(self):
+        # A resumed session could not find case c_ab953168 (setup review 2026-11-16, T2).
+        code, out = self.cli("mark-pending", "--stdin", stdin_text="# cp\nWaiting on c_ab953168 in Waggle.\n")
+        self.assertEqual(code, 1)
+        self.assertIn("c_ab953168", out)
+        self.assertIsNone(self.consume())
+        for text in ("# cp\nWaiting on c_77858165-51d7-4afe-a979-f8aceb027ddf.\n", "# cp\nNo case.\n"):
+            with self.subTest(text=text):
+                self.assertEqual(self.cli("mark-pending", "--stdin", stdin_text=text)[0], 0)
+
+    def test_empty_next_action_is_refused(self):
+        # Work done: nothing to resume (setup review 2026-11-16, T3).
+        for body in ("", "—", "  —  \n", "Nothing pending: wait for Matteo.", "Nessuna. Aspettare Matteo.", "- None."):
+            with self.subTest(body=body):
+                code, out = self.cli("mark-pending", "--stdin",
+                                     stdin_text="# cp\n## Goal\nx\n## Next action\n%s\n## Chat-only text\n—\n" % body)
+                self.assertEqual(code, 1)
+                self.assertIn("Next action", out)
+                self.assertIsNone(self.consume())
+        for body in ("Run the tests.", "None of the tests pass yet: fix them.", "Wait for the next scheduled run."):
+            with self.subTest(body=body):
+                code, _ = self.cli("mark-pending", "--stdin", stdin_text="# cp\n## Next action\n%s\n" % body)
+                self.assertEqual(code, 0)
+
     def test_unreadable_context_fails(self):
         write_jsonl(self.transcript, [user_line()])
         checkpoint = self.tmp / "cp.md"
