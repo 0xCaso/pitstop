@@ -2,6 +2,7 @@
 import json
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, Mapping, Optional, Tuple
 
@@ -196,6 +197,9 @@ def _hands_back(name: str, block: Dict[str, Any]) -> bool:
 
 
 _PITSTOP_COMMAND = re.compile(r"<command-name>/pitstop(?::pitstop)?</command-name>")
+# User entries Claude Code or pitstop wrote: task notices, local commands and their output, the queued resume message.
+_NOT_WRITTEN = ("<task-notification>", "<command-name>", "<command-message>", "<local-command-",
+                "Resume from the pitstop checkpoint.")
 
 
 def read_owed_event(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Optional[str]:
@@ -247,6 +251,31 @@ def read_owed_event(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Op
                 notice = text.startswith("<task-notification>") or "[SYSTEM NOTIFICATION" in text[:200]
                 event = "a task notification" if notice else "a user message"
     return event
+
+
+def read_last_user_message_ts(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Optional[float]:
+    """When the user last wrote to the main thread (epoch seconds), or None. Entries the user did not write do not
+    count: tool results, task notifications, compaction summaries, local commands (/compact, /model), /pitstop and
+    the resume message pitstop queues."""
+    for line in _lines_from_end(transcript_path, max_bytes):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isSidechain") is True \
+                or entry.get("isMeta") is True or entry.get("isCompactSummary") is True:
+            continue
+        blocks = _blocks(entry.get("message"))
+        if any(b.get("type") == "tool_result" for b in blocks) or not _has_text(blocks):
+            continue
+        text = "\n".join(str(b.get("text", "")) for b in blocks if b.get("type") == "text").lstrip()
+        if _PITSTOP_COMMAND.search(text[:400]) or text.startswith(_NOT_WRITTEN) or "[SYSTEM NOTIFICATION" in text[:200]:
+            continue
+        try:
+            return datetime.fromisoformat(str(entry.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
 
 
 def read_tool_inputs_naming(transcript_path: str, start: int, needle: str,

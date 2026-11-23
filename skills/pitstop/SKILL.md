@@ -92,6 +92,8 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    - `--cwd <cwd>` for an automatic pitstop; `--plan <plan path>` when a superpowers plan is being executed.
    - If it exits non-zero because files under "Re-read" were not found, fix those entries and run it once more.
      A `warning: not checked under Re-read` line is only a notice: carry on.
+   - A `warning: feedback ledger <path> older than the last user message` line: before the restart step, copy
+     the feedback the user gave since then into that ledger (the checkpoint already cites it).
    - If it exits non-zero with `owed reply:`, a message or a result (a subagent report, a delegate that ended)
      came after your last text to the user: send that reply now (for a result, one line on what it says), or set
      the line to NOT SENT with the text under Chat-only text, then run it once more.
@@ -190,6 +192,8 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
   on; copy what exists only in chat, an attachment or a temp folder.
 - Name the approved mockup (path + Waggle case id) and the feedback ledger file with its open ids when the work
   follows them.
+- Each count or status under Current state names its source and time (a file, a command output, a PR state as
+  of when) and says when it is partial; never merge two runs into one line.
 - Mark with `(assumed)` a fact you did not check in a file, a command output or the user's words.
 - Leave out secrets, tokens, passwords and personal data.
 - Write `—` under an empty section.
@@ -197,7 +201,8 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
 ## Resuming
 
 The first message after `/clear` (any text), or the compacted session after `/compact`, arrives with a
-`[pitstop]` checkpoint; follow the steps in that message: re-read only the cited files the next action needs;
+`[pitstop]` checkpoint; follow the steps in that message: read the files the next action depends on before you state
+anything, and never call something missing or confirmed after a single failed search;
 if the checkpoint says `Last reply to the user: NOT SENT`, send that reply first, from Chat-only text, before the
 next action, and never tell the user it was already sent; print `🔋 **pitstop** · resumed from <K> · Where we were:` with three short lines (goal, state, next action), then
 continue. If something is missing, look for it in the transcript the message names ("Transcript before the
