@@ -1,7 +1,7 @@
 # Feedback 2026-11-23: a skipped pitstop folds the reply in T3 Code
 
-Source: scrawl capture 1795422980802 (T3 Code, session 7d48d60d, offer at 187K with background tasks running).
-Copy: `docs/feedback/scrawl/1795422980802/`.
+Source: a scrawl capture (T3 Code, an offer at 187K with background tasks running). The capture is kept outside the
+repo (`docs/decisions/2026-11-23-history-rewrite-privacy.md`).
 
 | id | status | feedback (word for word) |
 |---|---|---|
