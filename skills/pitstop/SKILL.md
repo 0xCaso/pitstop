@@ -180,13 +180,13 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
 - For --kind other the state lives in the chat: put the tables, lists, figures and sources the next action needs under "Chat-only text" word for word, and when they pass about 1K tokens save them to a support file and cite it.
 - Exact strings the remaining work needs (commands that worked, ids, model names, paths, error text, the option
   texts of a choice the user made) go word for word, never as a description. Write Waggle case ids in full
-  (`c_` plus the whole uuid): mark-pending refuses a shortened one.
+  (`c_` plus the whole uuid): mark-pending refuses a shortened one. Commands that the Next action and the
+  remaining steps run again (build, render, screenshot, dev server, migration) go word for word with all their
+  arguments.
 - Exact strings: absolute path or exact command of every script, command, draft or data the work made or relies
   on; copy what exists only in chat, an attachment or a temp folder.
 - Name the approved mockup (path + Waggle case id) and the feedback ledger file with its open ids when the work
-  follows them. Commands that the Next action and
-  the remaining steps run again (build, render, screenshot, dev server, migration) go word for word with all
-  their arguments.
+  follows them.
 - Mark with `(assumed)` a fact you did not check in a file, a command output or the user's words.
 - Leave out secrets, tokens, passwords and personal data.
 - Write `—` under an empty section.

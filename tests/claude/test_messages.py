@@ -2,6 +2,7 @@ import dataclasses
 import unittest
 
 from pitstop.claude.messages import (
+    reply_language,
     badge_title,
     banner_resumed,
     banner_triggered,
@@ -95,6 +96,17 @@ class PreviousTranscriptTest(unittest.TestCase):
                 self.assertIn("in Italian (the language used before the restart)", resume_context(RECORD, cp, cli="/x"))
         cp = "# cp\n## User preferences\n- Code, commits and PRs always in English.\n"
         self.assertIn("in the language used before the restart, not the language", resume_context(RECORD, cp, cli="/x"))
+
+    def test_reply_language_skips_code_negated_and_conditional_rules(self):
+        # fresh-review 2026-11-23: these read as "English" and told Italian sessions to write English.
+        cases = {"Scrivi i commit in inglese; rispondi in italiano.": "Italian",
+                 "scrivi commit e PR in inglese": None,
+                 "Never reply in English.": None,
+                 "Reply in English when I write English, Italian when I write Italian.": None,
+                 "scrivi in italiano": "Italian"}
+        for rule, want in cases.items():
+            with self.subTest(rule=rule):
+                self.assertEqual(reply_language("# cp\n## User preferences\n- %s\n" % rule), want)
 
     def test_resume_context_of_a_delegate_has_no_banner(self):
         # F4 (docs/feedback/2026-11-23-pitstop-quando-non-partire.md): the parent got the banner, not the report.

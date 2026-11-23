@@ -169,6 +169,13 @@ class ReadOwedEventTest(TempLayoutTestCase):
         self.assertIsNone(self.owed(said("delego"), called(name), tool_result(running)))
         self.assertEqual(self.owed(said("delego"), called(name), tool_result(done)), "a task_status result")
 
+    def test_pitstop_slash_command_is_not_owed(self):
+        # fresh-review 2026-11-23: /pitstop now refused its own checkpoint as an owed user message.
+        cmd = user_line("<command-message>pitstop:pitstop</command-message>\n<command-name>/pitstop:pitstop</command-name>"
+                        "\n<command-args>now</command-args>")
+        self.assertIsNone(self.owed(said("fatto"), cmd, called("Write"), tool_result()))
+        self.assertEqual(self.owed(said("fatto"), user_line("e poi?"), cmd), "a user message")
+
     def test_reply_after_the_event_owes_nothing(self):
         self.assertIsNone(self.owed(said("delego"), called("Agent"), tool_result(HAND_BACK), user_line("e il test?"),
                                     said("ecco il risultato")))

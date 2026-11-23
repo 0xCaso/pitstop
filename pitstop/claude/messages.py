@@ -178,13 +178,26 @@ _CHAT_LANGUAGE = re.compile(
     r"\b(?:repl\w*|answer\w*|chat|rispond\w*|rispost\w*|conversa\w*|scriv\w*)\b[^.\n]{0,40}?\bin\s+%s\b"
     r"|\b%s\b[^.\n;]{0,20}?\bin\s+chat\b" % (_LANG, _LANG), re.IGNORECASE)
 _ASK_LANGUAGE = re.compile(r"\b(?:waggle|asks?)\b[^.\n]{0,40}?\bin\s+%s\b" % _LANG, re.IGNORECASE)
+# A match is no rule on replies when it is about code ("scrivi i commit in inglese"), negated ("never reply in
+# English") or conditional ("reply in English when I write English"): the language then follows the user.
+_CODE_WORDS = re.compile(r"\b(?:commit\w*|code|codice|PRs?|branch\w*|identifier\w*|comment\w*|commenti)\b", re.IGNORECASE)
+_NEGATION = re.compile(r"\b(?:never|not|don't|do not|non|mai)\W+(?:\w+\W+)?$", re.IGNORECASE)
+_CONDITIONAL = re.compile(r"^\W*(?:when|if|quando|se)\s+(?:I|io)?\s*(?:write|scrivo)\b", re.IGNORECASE)
+
+
+def _rule_language(pattern: "re.Pattern[str]", text: str) -> Optional[str]:
+    for match in pattern.finditer(text):
+        before, after = text[max(0, match.start() - 20):match.start()], text[match.end():match.end() + 20]
+        if _CODE_WORDS.search(match.group(0)) or _NEGATION.search(before) or _CONDITIONAL.search(after):
+            continue
+        return _LANGUAGES[next(g for g in match.groups() if g).lower()]
+    return None
 
 
 def reply_language(checkpoint_text: str) -> Optional[str]:
     """The language the checkpoint's User preferences ask replies in, in English (e.g. "Italian"), or None."""
     preferences = section(checkpoint_text, "User preferences")
-    match = _CHAT_LANGUAGE.search(preferences) or _ASK_LANGUAGE.search(preferences)
-    return _LANGUAGES[next(g for g in match.groups() if g).lower()] if match else None
+    return _rule_language(_CHAT_LANGUAGE, preferences) or _rule_language(_ASK_LANGUAGE, preferences)
 
 
 def resume_context(record: PendingRecord, checkpoint_text: str, cli: str, delegate: bool = False) -> str:
