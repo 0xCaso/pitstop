@@ -27,6 +27,18 @@ on 0.5.1) its lead on the next action is smaller. This run is the baseline that 
   `docs/superpowers/research/twin.py` (version filter, main sessions only, account override), not committed.
 - Known leak: 2 of the 11 N wins come from P reading files written after the cut.
 
+## 0.5.3 against this baseline (same cycles, 27 graded)
+| P | 0.5.2 | 0.5.3 |
+|---|---|---|
+| Next action yes / no | 14 / 2 | 15 / 2 |
+| Owed replies dropped | 1 of 22 | 2 of 21 |
+| Wrong claims | 15 | 16 |
+| Missing details | 57 | 54 |
+| Better than N | 18 | 15 (2 ties) |
+
+Not worse on P's own numbers; the wins move because N also changed (next action yes 7 → 10). Cost USD 118.62.
+Release (REL) waits for Matteo's go-ahead in Waggle.
+
 ## Open questions
 - Threshold for "worse" in later reviews (2026-11-19 record): proposed, P's next-action-yes share not more than
   10 points below this baseline and owed replies dropped not above 2 of 23 (ipotesi, for Matteo).
