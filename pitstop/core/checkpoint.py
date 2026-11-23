@@ -138,11 +138,12 @@ def analyze_checkpoint(text: str, cwd: str, support_dir: str) -> CheckpointStats
 
 def reread_ledgers(text: str) -> List[str]:
     """The feedback ledgers (`docs/feedback/*.md`) cited under Re-read, as written."""
-    ledgers = []
+    ledgers: List[str] = []
     for line in _sections(text).get(REREAD, "").splitlines():
-        if line.startswith("- "):
-            ledgers += [p for p in (_LINE_SUFFIX.sub("", q) for q in _leading_paths(line[2:].strip()))
-                        if _LEDGER.search(p)]
+        if line.startswith("- ") and "origin/" not in line:
+            for path in (_LINE_SUFFIX.sub("", q) for q in _leading_paths(line[2:].strip())):
+                if _LEDGER.search(path) and path not in ledgers:
+                    ledgers.append(path)
     return ledgers
 
 

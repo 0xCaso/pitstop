@@ -140,6 +140,30 @@ class MarkPendingTest(CliTestCase):
         self.assertEqual(code, 0)
         self.assertNotIn("feedback ledger", out)
 
+    def test_entries_the_user_did_not_write_do_not_count_as_the_last_message(self):
+        ledger_ts, user_ts = NOW - 300, NOW - 600
+        stamp = lambda t: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(t))
+        later = [dict(user_line("Resume from the pitstop checkpoint."), timestamp=stamp(NOW - 30)),
+                 dict(user_line("riassunto"), isCompactSummary=True, timestamp=stamp(NOW - 40)),
+                 dict(user_line("<command-name>/compact</command-name>"), timestamp=stamp(NOW - 50)),
+                 dict(user_line("<task-notification>done</task-notification>"), timestamp=stamp(NOW - 55)),
+                 dict(user_line("<command-name>/pitstop:pitstop</command-name> now"), timestamp=stamp(NOW - 58))]
+        write_jsonl(self.transcript, [dict(user_line("aggiungi F3"), timestamp=stamp(user_ts)), assistant_line()]
+                    + later)
+        ledger = self.tmp / "docs" / "feedback" / "2026-11-23-x.md"
+        ledger.parent.mkdir(parents=True)
+        ledger.write_text("| F1 | open |\n")
+        os.utime(ledger, (ledger_ts, ledger_ts))
+        cited = "- `docs/feedback/2026-11-23-x.md` — open F1"
+        code, out = self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp),
+                             stdin_text=self.reread_checkpoint(cited, cited))
+        self.assertEqual(code, 0)
+        self.assertNotIn("feedback ledger", out)
+        os.utime(ledger, (user_ts - 60, user_ts - 60))
+        code, out = self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp),
+                             stdin_text=self.reread_checkpoint(cited, cited))
+        self.assertEqual(out.count("feedback ledger"), 1)
+
     def test_done_event_carries_checkpoint_stats_and_kind(self):
         notes = self.layout.checkpoints_dir / "cp-chat.md"
         notes.parent.mkdir(parents=True)

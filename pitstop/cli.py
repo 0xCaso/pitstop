@@ -179,7 +179,10 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         ctx.say("warning: not checked under Re-read: %d entries" % len(stats.unchecked))
     # P1 review C: a ledger not updated since the last user message may miss the feedback in it.
     ledgers = reread_ledgers(text)
-    last_user = read_last_user_message_ts(str(transcript)) if ledgers else None
+    try:
+        last_user = read_last_user_message_ts(str(transcript)) if ledgers else None
+    except OSError:
+        last_user = None
     for ledger in ledgers if last_user else []:
         path = Path(os.path.expanduser(ledger))
         path = path if path.is_absolute() else Path(cwd) / path

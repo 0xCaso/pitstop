@@ -92,8 +92,8 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    - `--cwd <cwd>` for an automatic pitstop; `--plan <plan path>` when a superpowers plan is being executed.
    - If it exits non-zero because files under "Re-read" were not found, fix those entries and run it once more.
      A `warning: not checked under Re-read` line is only a notice: carry on.
-   - A `warning: feedback ledger <path> older than the last user message` line: copy the feedback the user gave
-     since then into that ledger now (the checkpoint already cites it).
+   - A `warning: feedback ledger <path> older than the last user message` line: before the restart step, copy
+     the feedback the user gave since then into that ledger (the checkpoint already cites it).
    - If it exits non-zero with `owed reply:`, a message or a result (a subagent report, a delegate that ended)
      came after your last text to the user: send that reply now (for a result, one line on what it says), or set
      the line to NOT SENT with the text under Chat-only text, then run it once more.
