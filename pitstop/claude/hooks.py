@@ -168,7 +168,7 @@ def _request(inp: HookInput, layout: Layout, notifier: Notifier, config: Config,
     context = messages.hard_request_context(tokens, config.hard_threshold_tokens, config.retrigger_step_tokens,
                                             inp.cwd, str(CLI_PATH), str(SKILL_PATH), background_tasks)
     banner = messages.banner_hard(tokens)
-    if output_event == "Stop" and background_tasks == 0 and host() != "sdk-cli":
+    if output_event == "Stop" and host() != "sdk-cli":  # a Stop with background tasks never gets here
         # (`claude -p` is left alone: a block would replace its answer with the pitstop.)
         # Past the hard limit, with nothing running: Claude does not stop, it does the pitstop. Claude Code sends
         # the next Stop with stop_hook_active, and decide() never blocks that one.
@@ -203,6 +203,12 @@ def _handle_stop(inp: HookInput, layout: Layout, notifier: Notifier, now: float)
         event = Event("stop", tokens, stop_hook_active=inp.stop_hook_active)
         action = decide(config, state, event).action
         if action == HARD and _checkpoint_waiting(layout, inp.session_id, now, config):
+            return None
+        if action in (OFFER, REQUEST, HARD) and inp.background_tasks > 0:
+            # Claude could only skip, and its skip line would become the turn's last message: hosts like T3 Code
+            # fold the reply above it. Ask nothing; the next Stop with nothing running asks as usual.
+            log_event(layout, "stop", "deferred", session_id=inp.session_id, context_tokens=tokens,
+                      background_tasks=inp.background_tasks, host=host())
             return None
         if action == OFFER:
             cycle_id = _open_offer(state, tokens)
