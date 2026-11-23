@@ -139,10 +139,11 @@ class SnapshotTest(unittest.TestCase):
             self.assertFalse((copy / "new.md").exists())
 
     def test_grader_counts_a_missing_detail_only_if_the_real_session_used_it(self):
-        prompt = twin.CONT_GRADE_PROMPT
-        self.assertIn("only if the real session\n  used it in its next steps", prompt)
+        prompt = " ".join(twin.CONT_GRADE_PROMPT.format(limit=twin.TOOL_INPUT_CHARS, cut="c", before="b", after="a",
+                                                        message="m", x="x", y="y").split())
+        self.assertIn("only if the real session used it in its next steps", prompt)
         self.assertIn("neither states it nor shows it has it", prompt)
-        prompt.format(cut="c", before="b", after="a", message="m", x="x", y="y")
+        self.assertIn("cut at %d characters" % twin.TOOL_INPUT_CHARS, prompt)
 
     def test_last_text_reads_the_last_assistant_text_after_the_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
