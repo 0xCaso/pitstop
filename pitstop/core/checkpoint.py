@@ -19,6 +19,7 @@ _BACKTICKS = re.compile(r"`([^`]+)`")
 _SEPARATOR = re.compile(r"^\s*(,|;|&|\band\b|\be\b)?\s*")
 _LINE_SUFFIX = re.compile(r":\d+(-\d+)?$")
 _PATTERN_CHARS = set("*?{}[]<>")
+_LEDGER = re.compile(r"(?:^|/)docs/feedback/[^/]+\.md$")
 # A Waggle case id: c_ plus a full uuid. A shorter one cannot be found again after the restart.
 _CASE_TOKEN = re.compile(r"(?<![\w-])c_[0-9a-f]{6,}(?:-[0-9a-f]+)*(?![\w-])")
 # How done work reads in real checkpoints: "Nothing pending: wait for …", "Nessuna. Aspettare Matteo." (2026-11).
@@ -133,6 +134,16 @@ def analyze_checkpoint(text: str, cwd: str, support_dir: str) -> CheckpointStats
         missing=missing,
         unchecked=unchecked,
     )
+
+
+def reread_ledgers(text: str) -> List[str]:
+    """The feedback ledgers (`docs/feedback/*.md`) cited under Re-read, as written."""
+    ledgers = []
+    for line in _sections(text).get(REREAD, "").splitlines():
+        if line.startswith("- "):
+            ledgers += [p for p in (_LINE_SUFFIX.sub("", q) for q in _leading_paths(line[2:].strip()))
+                        if _LEDGER.search(p)]
+    return ledgers
 
 
 def section(text: str, title: str) -> str:

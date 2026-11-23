@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import time
 from pathlib import Path
 
@@ -116,6 +117,28 @@ class MarkPendingTest(CliTestCase):
         self.assertEqual(code, 0)
         self.assertTrue(out.startswith("warning: not checked under Re-read: 2 entries\n"))
         self.assertIsNotNone(consume_pending(self.layout, "s1", str(self.tmp), NOW, 10))
+
+    def ledger_case(self, ledger_age):
+        """A transcript whose last user message is at NOW - 60, and a cited ledger last changed at NOW - age."""
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(NOW - 60))
+        write_jsonl(self.transcript, [dict(user_line("aggiungi F3"), timestamp=stamp), assistant_line()])
+        ledger = self.tmp / "docs" / "feedback" / "2026-11-23-x.md"
+        ledger.parent.mkdir(parents=True)
+        ledger.write_text("| F1 | open |\n")
+        os.utime(ledger, (NOW - ledger_age, NOW - ledger_age))
+        return self.cli("mark-pending", "--stdin", "--cwd", str(self.tmp),
+                        stdin_text=self.reread_checkpoint("- `docs/feedback/2026-11-23-x.md` — open F1"))
+
+    def test_ledger_older_than_the_last_user_message_warns_and_registers(self):
+        code, out = self.ledger_case(ledger_age=600)
+        self.assertEqual(code, 0)
+        self.assertIn("warning: feedback ledger docs/feedback/2026-11-23-x.md older than the last user message\n", out)
+        self.assertIsNotNone(consume_pending(self.layout, "s1", str(self.tmp), NOW, 10))
+
+    def test_ledger_newer_than_the_last_user_message_does_not_warn(self):
+        code, out = self.ledger_case(ledger_age=10)
+        self.assertEqual(code, 0)
+        self.assertNotIn("feedback ledger", out)
 
     def test_done_event_carries_checkpoint_stats_and_kind(self):
         notes = self.layout.checkpoints_dir / "cp-chat.md"

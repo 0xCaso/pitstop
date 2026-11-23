@@ -68,6 +68,14 @@ class MessagesTest(unittest.TestCase):
         self.assertIn('/usr/bin/python3 /repo/bin/pitstop gap "', text)
 
 
+    def test_resume_context_checks_files_before_it_states(self):
+        text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop")
+        self.assertNotIn("Do not re-explore", text)
+        self.assertIn("read the files the next action depends on", text)
+        self.assertIn("never call something missing or confirmed after a single failed search", text)
+        self.assertLess(text.index("read the files the next action depends on"), text.index("Print exactly"))
+
+
 class PreviousTranscriptTest(unittest.TestCase):
     def test_resume_context_sends_an_owed_reply_before_the_next_action(self):
         text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop")

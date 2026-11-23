@@ -22,10 +22,11 @@ from pitstop.claude.transcript import (
     find_transcript,
     read_context_tokens,
     read_last_cwd,
+    read_last_user_message_ts,
     read_session_title,
 )
 from pitstop.core.build import new_cycle_id
-from pitstop.core.checkpoint import analyze_checkpoint, incomplete_case_ids, next_action_empty
+from pitstop.core.checkpoint import analyze_checkpoint, incomplete_case_ids, next_action_empty, reread_ledgers
 from pitstop.core.config import _INT_RANGES, ConfigError, load_config, update_config
 from pitstop.core.cycles import Cycle, build_cycles, next_start
 from pitstop.core.fsutil import append_line, atomic_write_text
@@ -176,6 +177,14 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         raise CliError("files under Re-read not found: %s" % ", ".join(stats.missing))
     if stats.unchecked:
         ctx.say("warning: not checked under Re-read: %d entries" % len(stats.unchecked))
+    # P1 review C: a ledger not updated since the last user message may miss the feedback in it.
+    ledgers = reread_ledgers(text)
+    last_user = read_last_user_message_ts(str(transcript)) if ledgers else None
+    for ledger in ledgers if last_user else []:
+        path = Path(os.path.expanduser(ledger))
+        path = path if path.is_absolute() else Path(cwd) / path
+        if path.is_file() and path.stat().st_mtime < last_user:
+            ctx.say("warning: feedback ledger %s older than the last user message" % ledger)
     if checkpoint is None:
         checkpoint = write_checkpoint(ctx.layout, session, text, ctx.now)
     # SDK hosts (T3 Code) have no /clear: there the session compacts and resumes in place.

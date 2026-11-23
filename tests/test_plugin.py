@@ -60,6 +60,12 @@ class PluginFilesTest(unittest.TestCase):
         template = text.split("```markdown", 1)[1].split("```", 1)[0]
         self.assertIn("## Next action\n<one precise action>\n## Chat-only text\n", template)
 
+    def test_skill_counts_and_statuses_carry_their_source(self):
+        text = " ".join(SKILL_PATH.read_text(encoding="utf-8").split())
+        self.assertIn("Each count or status under Current state names its source and time", text)
+        self.assertIn("never merge two runs into one line", text)
+        self.assertIn("read the files the next action depends on", text)
+
     def test_skill_template_has_no_discarded_section(self):
         template = SKILL_PATH.read_text(encoding="utf-8").split("```markdown\n# pitstop checkpoint", 1)[1].split("```", 1)[0]
         self.assertNotIn("## Discarded", template)
