@@ -26,7 +26,8 @@ checkpoint (P). The README shows the latest totals; this file keeps every run. A
   the cut time and does not count facts that appear only after it. Runs before this date are not comparable
   with later ones.
 - **Limits.** Few sessions, all from the author; a model grades. Files changed after the cut are missing from the
-  snapshot, not restored to their older content. Script: `scripts/twin.py` (`--versions`, `--main-only`,
+  snapshot, not restored to their older content. The P arm gets the resume text as a user message, with no plan
+  step (the cycle log does not keep the plan). Script: `scripts/twin.py` (`--versions`, `--main-only`,
   `--pitstop-root` for the version P gets, `--config-dir` for the account); it reads the author's pitstop log.
 
 ## 2026-11-23 · continuation with snapshot · pitstop 0.5.3 (pre-release) · 27 sessions

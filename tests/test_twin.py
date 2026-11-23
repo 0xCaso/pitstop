@@ -48,8 +48,21 @@ class GuardTest(unittest.TestCase):
         command = "'/Applications/Google Chrome.app/x' --headless; sed -i 's/- (20)/-/' f.md"
         self.assertIsNone(guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
 
+    def test_home_through_variables_or_tilde_is_refused(self):
+        for command in ('cat "$HOME/.claude/x"', "ls ${CLAUDE_CONFIG_DIR}", "cd ~ && cat .claude/x"):
+            self.assertIn("outside", guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
+
+    def test_heredoc_fed_to_an_interpreter_is_scanned(self):
+        command = "python3 - <<'EOF'\nprint(open('/Users/me/repo/f').read())\nEOF"
+        self.assertIn("/Users/me", guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
+
+    def test_network_words_in_arguments_are_not_commands(self):
+        for command in ("grep -n curl README.md", 'git commit -m "before git push"'):
+            self.assertIsNone(guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
+
     def test_network_and_push_are_refused(self):
-        for command in ("git push origin main", "gh pr create", "curl -s https://x.dev", "npm publish"):
+        for command in ("git push origin main", "gh pr create", "curl -s https://x.dev", "npm publish",
+                        "cd x && GH_TOKEN=t gh pr create", "echo $(curl -s x.dev)", "git -C repo push"):
             self.assertIn("no network", guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
 
     def test_hook_prints_a_deny_decision_and_logs_it(self):
@@ -91,8 +104,15 @@ class SnapshotTest(unittest.TestCase):
                          'cd /snap/repo/x; ls /snap/_ext/tmp/s/f; {"p": "/snap/repo"}')
         self.assertEqual(twin.rewrite("/tmp/s", {"/tmp/s": "/tmp/s/copy"}), "/tmp/s/copy")
 
+    def test_rewrite_matches_tilde_and_tmp_forms_and_whole_path_parts_only(self):
+        copies = {"/private/tmp/s": "/snap/_ext/s", "/Users/me/.claude/t": "/snap/_ext/t", "/Users/me/p": "/snap/repo"}
+        mapping = {form: copy for real, copy in copies.items() for form in twin.aliases(real, "/Users/me")}
+        text = "ls /tmp/s/f ~/.claude/t/a.md /Users/me/p/x /Users/me/p-site/y /Users/me/p."
+        self.assertEqual(twin.rewrite(text, mapping),
+                         "ls /snap/_ext/s/f /snap/_ext/t/a.md /snap/repo/x /Users/me/p-site/y /snap/repo.")
+
     def test_outside_paths_keep_named_folders_and_skip_repo_home_and_transcripts(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:  # not /var/folders, which is never copied
             tmp = os.path.realpath(tmp)
             home, repo = Path(tmp) / "home", Path(tmp) / "home" / "work" / "repo"
             pad = Path(tmp) / "home" / "pads" / "s1" / "scratchpad"

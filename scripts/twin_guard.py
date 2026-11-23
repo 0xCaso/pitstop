@@ -12,7 +12,13 @@ import time
 # Absolute paths a command may name without leaving the snapshot: system tools and throwaway temp files.
 SYSTEM = ("/usr/", "/bin/", "/sbin/", "/opt/homebrew/", "/System/", "/Library/Developer/", "/dev/null", "/dev/std",
           "/Applications/")
-OUTWARD = re.compile(r"\b(?:git\s+push|gh\s+(?:pr|issue|release|api|repo)|npm\s+publish|curl|wget|ssh|scp|rsync)\b")
+# A network or push command at command position (start, after ; & | ( or $( , after env assignments).
+OUTWARD = re.compile(r"(?:^|[;&|(\n]|\$\(|\b(?:then|do|xargs|exec|command|env|sudo))\s*(?:\w+=\S*\s+)*"
+                     r"(?:git\s+(?:-[Cc]\s+\S+\s+|-\S+\s+)*push|gh\s+(?:pr|issue|release|api|repo)|npm\s+publish|curl|wget|ssh|scp"
+                     r"|rsync)\b")
+# Paths a command reaches without naming them: the home folder and the account folder through variables or ~.
+HIDDEN_PATH = re.compile(r"\$\{?(?:HOME|CLAUDE_CONFIG_DIR)\b|(?<![\w./~-])~(?=$|[\s;&|)'\"`])")
+INTERPRETER = re.compile(r"\b(?:python[\d.]*|node|ruby|perl|php|bash|sh|zsh|osascript|deno|bun)\b")
 PATH_KEYS = ("file_path", "path", "notebook_path")
 HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n.*?\n\s*\1\s*(?:\n|$)", re.DOTALL)
 ABS_PATH = re.compile(r"(?<![\w.:/<>-])(?:~|/)[\w.@~][^\s'\"`;|&<>()]*")
@@ -22,6 +28,10 @@ UP_PATH = re.compile(r"(?<![\w.~/-])(?:[\w.@+-]+/)*\.\.(?:/[^\s'\"`;|&<>()]*)?")
 def _inside(path, roots):
     real = os.path.realpath(os.path.expanduser(path))
     return any(real == r or real.startswith(r.rstrip("/") + "/") for r in roots)
+
+
+def _line_before(text, index):
+    return text[text.rfind("\n", 0, index) + 1:index]
 
 
 def decide(tool, tool_input, roots, cwd=None):
@@ -35,9 +45,14 @@ def decide(tool, tool_input, roots, cwd=None):
             return "test run: %s is outside this session's files" % value
     if tool == "Bash":
         command = str(tool_input.get("command") or "")
-        command = HEREDOC.sub(lambda m: m.group(0).split("\n", 1)[0] + "\n", command)  # text, not paths
+        # A heredoc body is text written to a file, not paths, unless it feeds an interpreter.
+        command = HEREDOC.sub(lambda m: m.group(0) if INTERPRETER.search(_line_before(m.string, m.start()))
+                              else m.group(0).split("\n", 1)[0] + "\n", command)
         if OUTWARD.search(command):
             return "test run: no network, no push"
+        hidden = HIDDEN_PATH.search(command)
+        if hidden:
+            return "test run: %s points outside this session's files" % hidden.group(0)
         for match in ABS_PATH.findall(command):
             if match.startswith(SYSTEM) or _inside(match, roots):
                 continue

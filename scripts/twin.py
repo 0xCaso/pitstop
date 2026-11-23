@@ -61,7 +61,7 @@ sys.path.insert(0, str(ROOT))
 from pitstop.claude.messages import resume_context  # noqa: E402
 from pitstop.claude.report_scan import projects_dirs  # noqa: E402
 from pitstop.claude.review_scan import chat_excerpt  # noqa: E402
-from pitstop.claude.transcript import find_transcript  # noqa: E402
+from pitstop.claude.transcript import find_transcript, read_is_t3_delegate  # noqa: E402
 from pitstop.core.cycles import Cycle, build_cycles, next_start  # noqa: E402
 from pitstop.core.log import read_events  # noqa: E402
 from pitstop.core.paths import Layout, pitstop_home  # noqa: E402
@@ -146,8 +146,11 @@ def claude(args: List[str], cwd: str, config_dir: Optional[str], prompt: str,
         env["CLAUDE_CONFIG_DIR"] = config_dir
     env.update(extra_env or {})
     # The prompt goes on stdin: --tools and --allowedTools take several values and would swallow it.
-    out = subprocess.run(["claude", "-p"] + args, cwd=cwd, env=env, input=prompt,
-                         capture_output=True, text=True, timeout=CALL_TIMEOUT)
+    try:
+        out = subprocess.run(["claude", "-p"] + args, cwd=cwd, env=env, input=prompt,
+                             capture_output=True, text=True, timeout=CALL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("claude -p timeout after %ds" % CALL_TIMEOUT)
     try:
         data = json.loads(out.stdout)
     except ValueError:
@@ -419,7 +422,7 @@ EXT_MAX_FILES = 2000  # per cycle, over all outside folders
 EXT_TOOL_CALLS = 50
 # Outside paths never copied: system folders, other sessions' transcripts, whole home or Desktop folders.
 EXT_NEVER = ("/usr/", "/bin/", "/sbin/", "/System/", "/Library/", "/Applications/", "/opt/", "/dev/", "/etc/",
-             "/var/folders/")
+             "/var/folders/", "/private/etc/", "/private/var/")
 PATH_TOKEN = re.compile(r"(?:~|/)(?:Users|private|tmp|Volumes|home|~)?[\w.@~+/-]*")
 
 
@@ -503,8 +506,8 @@ def outside_paths(texts: List[str], top: str, home: str, keep_out: List[str]) ->
 
 
 def copy_outside(paths: List[str], ext_root: Path, cut_ts: float) -> Dict[str, str]:
-    """Copy each outside path under `ext_root` (a folder whole, a file with the files next to it); returns the map
-    from each real path to its copy."""
+    """Copy each outside path under `ext_root` (a folder whole, a file with the files next to it, or alone when it
+    sits in a top folder such as ~/.claude); returns the map from each real path to its copy."""
     budget = [EXT_MAX_FILES]
     mapping: Dict[str, str] = {}
     for path in paths:
@@ -512,24 +515,41 @@ def copy_outside(paths: List[str], ext_root: Path, cut_ts: float) -> Dict[str, s
         target = ext_root / path.lstrip("/")
         if src.is_dir():
             _copy_tree(src, target, cut_ts, budget)
-        elif src.is_file():
+        elif src.is_file() and len(src.parent.parts) > 4:
             _copy_tree(src.parent, target.parent, cut_ts, budget, recursive=False)
+        elif src.is_file():
+            if _copy_file(src, target, cut_ts):
+                budget[0] -= 1
         else:
             continue
         mapping[path] = str(target)
     return mapping
 
 
+def aliases(path: str, home: str) -> List[str]:
+    """The ways a session may write the real path `path`: as is, with /tmp or /var for macOS's /private/..., and
+    with ~ for the home folder."""
+    forms = [path]
+    for short in ("/tmp/", "/var/"):
+        if path.startswith("/private" + short):
+            forms.append(path[len("/private"):])
+    for form in list(forms):
+        if form.startswith(home.rstrip("/") + "/"):
+            forms.append("~" + form[len(home.rstrip("/")):])
+    return forms
+
+
 def rewrite(text: str, mapping: Dict[str, str]) -> str:
     """Every mapped path in `text` replaced by its copy, in one pass (longest path first), so a replacement is
-    never rewritten again. Paths appear as written and JSON-escaped."""
+    never rewritten again. Paths appear as written and JSON-escaped, and match only whole path parts."""
     if not mapping:
         return text
     pairs: Dict[str, str] = {}
     for old, new in mapping.items():
         pairs[old] = new
         pairs[json.dumps(old)[1:-1]] = json.dumps(new)[1:-1]
-    pattern = re.compile("|".join(re.escape(k) for k in sorted(pairs, key=len, reverse=True)))
+    pattern = re.compile(r"(?<![\w.~/-])(?:%s)(?![\w@+-]|\.\w)"
+                         % "|".join(re.escape(k) for k in sorted(pairs, key=len, reverse=True)))
     return pattern.sub(lambda m: pairs[m.group(0)], text)
 
 
@@ -662,10 +682,11 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     home = str(Path.home())
     keep_out = [str(Path(d)) for d in projects_dirs(os.environ, Path.home())] + [str(ROOT)]
     named = outside_paths([checkpoint_text] + recent_tool_inputs(rows, end, EXT_TOOL_CALLS), top, home, keep_out)
-    mapping = copy_outside(named, snap_root / "_ext", cut_ts)
-    mapping[os.path.realpath(top)] = os.path.realpath(snap_root / "repo")
+    copies = copy_outside(named, snap_root / "_ext", cut_ts)
+    copies[os.path.realpath(top)] = os.path.realpath(snap_root / "repo")
+    mapping = {form: copy for real, copy in copies.items() for form in aliases(real, home)}
     if top != os.path.realpath(top):
-        mapping[top] = mapping[os.path.realpath(top)]
+        mapping[top] = copies[os.path.realpath(top)]
     checkpoint_copy = snap_root / "_ext" / "checkpoint.md"
     checkpoint_copy.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_text = rewrite(checkpoint_text, mapping)
@@ -686,11 +707,13 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
             logs.mkdir(parents=True, exist_ok=True)
             # The twin's own scratchpad and task output live under /tmp/claude-<uid>/<project folder>.
             scratch = Path(os.path.realpath("/tmp")) / ("claude-%d" % os.getuid()) / _sanitize(run_cwd)
+            scratch.mkdir(parents=True, exist_ok=True)
             env = {"TWIN_ALLOW": os.pathsep.join([str(snap_root), str(project_dir), str(scratch)]),
                    "TWIN_GUARD_LOG": str(logs / "refused.jsonl"), "TWIN_WAGGLE_LOG": str(logs / "asks.jsonl"),
                    "PITSTOP_HOME": str(logs / "pitstop-home")}
             flags = ["--restricted", "--strict-mcp-config", "--mcp-config", arm_mcp(logs / "mcp.json"),
-                     "--settings", arm_settings(), "--output-format", "json", "--add-dir", str(snap_root)]
+                     "--settings", arm_settings(), "--output-format", "json",
+                     "--add-dir", str(snap_root), "--add-dir", str(project_dir), "--add-dir", str(scratch)]
             compact = claude(["--resume", twin] + flags, run_cwd, config_dir,
                              "/compact" if arm == "N" else P_COMPACT, env)
             cost[arm] += compact.get("total_cost_usd") or 0
@@ -700,19 +723,22 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
                 record = PendingRecord(checkpoint=str(checkpoint_copy), session_id=twin, cwd=run_cwd,
                                        context_tokens=cycle.done_tokens or 0, created_at=time.time(),
                                        project_dir=str(project_dir), restart="compact")  # transcript = twin
-                context = resume_context(record, checkpoint_text, cli)
-                # H6: the P arm gets what a real resume of this version gets, checkpoint included.
-                resume_input = {"chars": len(context), "checkpoint_in_input": checkpoint_text.strip() in context,
-                                "pitstop_root": str(ROOT)}
+                delegate = read_is_t3_delegate(str(src))
+                context = resume_context(record, checkpoint_text, cli, delegate=delegate)
+                # H6: the P arm gets the resume text this version's hook builds (as a user message, not as
+                # additional context; no plan: the cycle log does not keep it).
+                resume_input = {"chars": len(context), "delegate": delegate, "pitstop_root": str(ROOT)}
                 prompt = context + "\n\n---\n\n" + message
             try:
                 reply = claude(["--resume", twin] + flags + ["--tools", ARM_TOOLS] + CONT_TURNS, run_cwd,
                                config_dir, prompt, env)
                 cost[arm] += reply.get("total_cost_usd") or 0
-                text, turns, final = reply.get("result") or "", reply.get("num_turns"), True
-            except RuntimeError as exc:  # e.g. max turns reached: grade the twin's last text (H3)
-                text, turns, final = last_text(path) or "(no reply: %s)" % str(exc)[:200], None, False
-            arms[arm] = {"reply": text, "final_reply": final, "turns": turns, "tools": tool_calls(path),
+                text, turns, final, stop = reply.get("result") or "", reply.get("num_turns"), True, None
+                if not text:
+                    text, final, stop = last_text(path) or "(no reply)", False, reply.get("subtype") or "no result"
+            except RuntimeError as exc:  # max turns, timeout, API error: grade the twin's last text (H3)
+                text, turns, final, stop = last_text(path) or "(no reply)", None, False, str(exc)[:200]
+            arms[arm] = {"reply": text, "final_reply": final, "stopped": stop, "turns": turns, "tools": tool_calls(path),
                          "resume_tokens": resume_tokens(path), "asks": _jsonl(logs / "asks.jsonl"),
                          "refused": _jsonl(logs / "refused.jsonl"), "resume_input": resume_input}
     finally:
@@ -728,7 +754,7 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     order = ["N", "P"]
     random.shuffle(order)
     show = {a: "Reply%s:\n%s\n\nTool calls:\n%s\n\nWaggle asks recorded: %d · calls refused: %d" % (
-        "" if arms[a]["final_reply"] else " (turn limit: last text)", arms[a]["reply"],
+        "" if arms[a]["final_reply"] else " (no final reply, %s: last text)" % arms[a]["stopped"], arms[a]["reply"],
         "\n".join(arms[a]["tools"]) or "none", len(arms[a]["asks"]), len(arms[a]["refused"])) for a in order}
     grade_run = claude(["--tools", "", "--no-session-persistence", "--output-format", "json", "--settings",
                         '{"disableAllHooks": true}', "--strict-mcp-config"], str(out), None,
