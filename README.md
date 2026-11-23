@@ -89,19 +89,18 @@ pitstop, makes two copies (twins), restarts one with native `/compact` and one w
 sends both the message that really came next. A grader that does not know which twin is which compares their
 first reply with what the real session did.
 
-Latest results (2026-11-10, pitstop 0.5.0, 15 sessions):
+Latest results (2026-11-23, pitstop 0.5.3, 27 sessions):
 
 | | native compact | pitstop |
 |---|---|---|
-| Better first reply after the restart | 3 | **12** |
-| Next action fully right | 3 / 15 | **9 / 15** |
-| Owed replies dropped | 3 / 12 | **1 / 12** |
-| Wrong claims | 20 | **12** |
-| Missing details | 41 | **30** |
-| Facts lost when asked directly (5 sessions, 40 questions) | 1 / 40 | **0 / 40** |
-| Context after the restart (median) | 61K | 62K |
+| Better first reply after the restart | 10 | **15** |
+| Next action fully right | 10 / 27 | **15 / 27** |
+| Owed replies dropped | **1 / 21** | 2 / 21 |
+| Wrong claims | 24 | **16** |
+| Missing details | 58 | **54** |
+| Facts lost when asked directly (2026-11-10, 5 sessions, 40 questions) | 1 / 40 | **0 / 40** |
 
-Limits: 15 sessions, all from the author; the grader is a model; twins have read-only tools and no MCP servers.
+Limits: 27 sessions, all from the author; the grader is a model; twins have read-only tools and no MCP servers.
 Full results per session, and every later run: [docs/twin-tests.md](docs/twin-tests.md). This table is updated
 after each run.
 
