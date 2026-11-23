@@ -32,8 +32,16 @@ Change: "e poi assieme a quel check farei anche di nuovo un test su 30 cicli di 
 - "e poi assieme a quel check farei anche di nuovo un test su 30 cicli di pitstop contro autocompact": added as a
   constraint (twin test on 30 cycles at the same time as the check).
 
+## Threshold for "worse" (set 2026-11-23)
+Case c_cebd8baf-109b-4a3a-8950-7c07f5e416cc, chosen "10 punti, max 2 perse" (`2026-11-23-release-0-5-3.md`).
+A version is worse when, in a twin test on about 27 cycles:
+- P's next-action-yes share falls more than 10 points below the 0.5.2 baseline of 48% (14 of 29 cycles,
+  `2026-11-23-check-0-5-2-twin-test.md`), so below 38%; or
+- P drops more than 2 owed replies in about 23 cycles that owe one.
+Smaller moves are noise: N moved by 3 cycles between two runs of the same version.
+
 ## Open questions
-- Exact threshold for "gets worse" in `pitstop report`: set it at the check, from the 0.5.2 numbers.
+—
 
 ## Sources
 - Case c_938db22f-ead1-4695-b94c-fcbc926a9f78.
