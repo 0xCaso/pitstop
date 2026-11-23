@@ -112,7 +112,7 @@ def offer_context(tokens: int, soft: int, threshold: int, cwd: str, cli: str, sk
 def hard_request_context(tokens: int, hard: int, step: int, cwd: str, cli: str, skill: str,
                          background_tasks: Optional[int]) -> str:
     head = ("[pitstop] Main-thread context is {k}, past the {hard} hard limit. Pitstop now. Skip only if subagents "
-            "or background tasks are running (category background-tasks).\n")
+            "or background tasks are running (category background-tasks), or the work is done (category done).\n")
     return _request_context(head, "hard", tokens, hard, step, cwd, cli, skill, background_tasks,
                             skip="if you skip, the request comes again at the end of this turn, and after +{step} "
                                  "tokens during it", hard=hard)
