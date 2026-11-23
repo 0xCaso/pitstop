@@ -379,6 +379,7 @@ def run_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, Any]:
 CONT_BEFORE_CHARS = 15000
 CONT_AFTER_CHARS = 8000
 CONT_TURNS = ["--max-turns", "40"]
+TOOL_INPUT_CHARS = 600
 
 CONT_GRADE_PROMPT = """A coding session was restarted to free context at {cut} (UTC). Two restarted copies, X and Y,
 received the same first user message and replied. Judge which copy continued the work better.
@@ -398,7 +399,10 @@ For each copy give:
   is clearly acted on, "no" if it was dropped, "n.a." if nothing was owed;
 - "next_action": "yes" / "partly" / "no": the copy goes for the right next step;
 - "wrong_claims": false statements about the state of the work at the restart (short list, may be empty);
-- "missing_details": details of value from BEFORE that the copy lost and did not recover (short list).
+- "missing_details": details from BEFORE that the copy lost (short list). List a detail only if the real session
+  used it in its next steps (REAL AFTER) and the copy neither states it nor shows it has it (in its reply or its tool
+  calls). A detail the copy did not need yet, or a detail it acts on without restating it, is not missing. Tool
+  call inputs are cut at {limit} characters: do not count a detail as missing only because a call was cut.
 Then "winner": "X", "Y" or "tie", and "why" in one sentence.
 Reply ONLY with JSON: {{"x": {{"owed_reply": "...", "next_action": "...", "wrong_claims": [], "missing_details": []}},
 "y": {{...}}, "winner": "...", "why": "..."}}
@@ -600,7 +604,7 @@ def tool_calls(path: Path) -> List[str]:
             continue
         for b in _blocks(entry):
             if b.get("type") == "tool_use":
-                calls.append("%s %s" % (b.get("name"), json.dumps(b.get("input"), ensure_ascii=False)[:200]))
+                calls.append("%s %s" % (b.get("name"), json.dumps(b.get("input"), ensure_ascii=False)[:TOOL_INPUT_CHARS]))
     return calls
 
 
@@ -776,7 +780,7 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
         "\n".join(arms[a]["tools"]) or "none", len(arms[a]["asks"]), len(arms[a]["refused"])) for a in order}
     grade_run = claude(["--tools", "", "--no-session-persistence", "--output-format", "json", "--settings",
                         '{"disableAllHooks": true}', "--strict-mcp-config"], str(out), None,
-                       CONT_GRADE_PROMPT.format(cut=time.strftime("%Y-%m-%d %H:%M", time.gmtime(cut_ts)),
+                       CONT_GRADE_PROMPT.format(limit=TOOL_INPUT_CHARS, cut=time.strftime("%Y-%m-%d %H:%M", time.gmtime(cut_ts)),
                                                 before=before, after=after, message=message,
                                                 x=show[order[0]], y=show[order[1]]))
     cost["grade"] += grade_run.get("total_cost_usd") or 0

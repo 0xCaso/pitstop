@@ -23,8 +23,10 @@ checkpoint (P). The README shows the latest totals; this file keeps every run. A
   tools inside the snapshot and a stub Waggle server that records asks and never answers. The snapshot also holds
   the outside folders (a scratchpad, a data folder) named in the checkpoint and in the last 50 tool calls, with
   their paths rewritten. A twin gets 40 turns; one with no final reply is graded on its last text. The grader gets
-  the cut time and does not count facts that appear only after it. Runs before this date are not comparable
-  with later ones.
+  the cut time and does not count facts that appear only after it. A missing detail counts only if the real
+  session used it in its next steps and the twin neither states it nor shows it has it (P3d). Runs before this
+  date are not comparable with later ones, and missing-detail counts before P3d (all runs below this section
+  so far, the two 2026-11-23 runs included) are not comparable with counts after it.
 - **Limits.** Few sessions, all from the author; a model grades. Files changed after the cut are missing from the
   snapshot, not restored to their older content. The P arm gets the resume text as a user message, with no plan
   step (the cycle log does not keep the plan). Script: `scripts/twin.py` (`--versions`, `--main-only`,
