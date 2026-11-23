@@ -130,6 +130,6 @@ class ZoneMessagesTest(unittest.TestCase):
         text = hard_request_context(285000, 280000, 50000, "/w", "/cli", "/skill", 2)
         self.assertTrue(text.startswith(
             "[pitstop] Main-thread context is 285K, past the 280K hard limit. Pitstop now. Skip only if subagents or "
-            "background tasks are running (category background-tasks).\n"))
+            "background tasks are running (category background-tasks), or the work is done (category done).\n"))
         self.assertIn("- mode: hard\n", text)
         self.assertIn("- background tasks running: 2\n", text)

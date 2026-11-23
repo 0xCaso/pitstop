@@ -67,8 +67,9 @@ pitstop and auto-compact work together: leave auto-compact on as a safety net ab
 
 Claude skips a pitstop when the checkpoint would lose something that lives only in the context: a debugging session
 half-way, fine edits on a long text, subagents still running, work that ends in a few exchanges. When in doubt,
-it skips, and it prints the reason as one of six fixed categories (`debugging`, `fine-editing`, `ending-soon`,
-`background-tasks`, `brainstorming`, `other`).
+it skips, and it prints the reason as one of seven fixed categories (`debugging`, `fine-editing`, `ending-soon`,
+`background-tasks`, `brainstorming`, `done`, `other`). It also skips when the work is done: a checkpoint with
+nothing left to resume is refused.
 
 ## Limits
 

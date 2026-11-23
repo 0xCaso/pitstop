@@ -12,7 +12,7 @@ from pitstop.core.cycles import CHECKPOINT_MEASURES, Cycle
 from pitstop.core.fsutil import append_line, file_lock
 from pitstop.core.paths import Layout
 
-SKIP_CATEGORIES = ("debugging", "fine-editing", "ending-soon", "background-tasks", "brainstorming", "other")
+SKIP_CATEGORIES = ("debugging", "fine-editing", "ending-soon", "background-tasks", "brainstorming", "done", "other")
 # `unparsed`: a skip line in the format before 0.2.0, with no category.
 SKIP_KEYS = SKIP_CATEGORIES + ("unparsed",)
 ROW_FIELDS = frozenset(
