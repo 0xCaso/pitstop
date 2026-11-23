@@ -398,7 +398,9 @@ For each copy give:
   is clearly acted on, "no" if it was dropped, "n.a." if nothing was owed;
 - "next_action": "yes" / "partly" / "no": the copy goes for the right next step;
 - "wrong_claims": false statements about the state of the work at the restart (short list, may be empty);
-- "missing_details": details of value from BEFORE that the copy lost and did not recover (short list).
+- "missing_details": details from BEFORE that the copy lost (short list). List a detail only if the real session
+  used it in its next steps (REAL AFTER) and the copy neither states it nor shows it has it (in its reply or its tool
+  calls). A detail the copy did not need yet, or a detail it acts on without restating it, is not missing.
 Then "winner": "X", "Y" or "tie", and "why" in one sentence.
 Reply ONLY with JSON: {{"x": {{"owed_reply": "...", "next_action": "...", "wrong_claims": [], "missing_details": []}},
 "y": {{...}}, "winner": "...", "why": "..."}}
