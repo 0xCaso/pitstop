@@ -61,11 +61,16 @@ sys.path.insert(0, str(ROOT))
 from pitstop.claude.messages import resume_context  # noqa: E402
 from pitstop.claude.report_scan import projects_dirs  # noqa: E402
 from pitstop.claude.review_scan import chat_excerpt  # noqa: E402
-from pitstop.claude.transcript import find_transcript, read_is_t3_delegate  # noqa: E402
+from pitstop.claude.transcript import find_transcript  # noqa: E402
 from pitstop.core.cycles import Cycle, build_cycles, next_start  # noqa: E402
 from pitstop.core.log import read_events  # noqa: E402
 from pitstop.core.paths import Layout, pitstop_home  # noqa: E402
 from pitstop.core.store import PendingRecord  # noqa: E402
+
+try:  # 0.5.3+: a T3 delegate's resume asks for no banner
+    from pitstop.claude.transcript import read_is_t3_delegate  # noqa: E402
+except ImportError:
+    read_is_t3_delegate = None
 
 CLI = str(ROOT / "bin" / "pitstop")
 P_COMPACT = '/compact One-line summary: "Resume from the pitstop checkpoint."'
@@ -548,7 +553,7 @@ def rewrite(text: str, mapping: Dict[str, str]) -> str:
     for old, new in mapping.items():
         pairs[old] = new
         pairs[json.dumps(old)[1:-1]] = json.dumps(new)[1:-1]
-    pattern = re.compile(r"(?<![\w.~/-])(?:%s)(?![\w@+-]|\.\w)"
+    pattern = re.compile(r"(?:(?<=\\[ntr])|(?<![\w.~/-]))(?:%s)(?![\w@+-]|\.\w)"
                          % "|".join(re.escape(k) for k in sorted(pairs, key=len, reverse=True)))
     return pattern.sub(lambda m: pairs[m.group(0)], text)
 
@@ -675,8 +680,11 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     # the tested CLI. Every path the twin sees is rewritten to its copy.
     # Not under ~/.claude: Claude Code treats files there as sensitive and refuses writes to them.
     snap_root = Path(os.path.realpath(SNAP_BASE)) / cycle.cycle_id
-    if snap_root.exists():
-        shutil.rmtree(snap_root)
+    pristine = snap_root.with_name(cycle.cycle_id + ".pristine")  # the snapshot again for P, without N's edits
+    logs_root = snap_root.with_name(cycle.cycle_id + ".logs")  # outside what the arms can read
+    for folder in (snap_root, pristine, logs_root):
+        if folder.exists():
+            shutil.rmtree(folder)
     top, snap_cwd = snapshot(cwd, cut_ts, snap_root / "repo")
     run_cwd = os.path.realpath(snap_cwd)
     home = str(Path.home())
@@ -693,6 +701,7 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     checkpoint_copy.write_text(checkpoint_text, encoding="utf-8")
     cli = pitstop_cli_copy(snap_root / "_pitstop")
     twin_rows = [(raw, json.loads(rewrite(raw.decode("utf-8"), mapping))) for raw, _ in rows[:end]]
+    shutil.copytree(snap_root, pristine, symlinks=True)
 
     cost: Dict[str, float] = {"N": 0.0, "P": 0.0, "grade": 0.0}
     project_dir = Path(config_dir) / "projects" / _sanitize(run_cwd)
@@ -700,14 +709,20 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     arms: Dict[str, Dict[str, Any]] = {}
     twins: List[Path] = []
     try:
+        # The twin's own scratchpad and task output live under /tmp/claude-<uid>/<project folder>.
+        scratch = Path(os.path.realpath("/tmp")) / ("claude-%d" % os.getuid()) / _sanitize(run_cwd)
         for arm in ("N", "P"):
+            if arm == "P":  # P starts from the same files as N: N's edits, scratchpad and twin are gone
+                for path in twins:
+                    remove_twin(path)
+                shutil.rmtree(snap_root)
+                shutil.copytree(pristine, snap_root, symlinks=True)
+            shutil.rmtree(scratch, ignore_errors=True)
+            scratch.mkdir(parents=True)
             twin, path = write_twin(twin_rows, end, project_dir)
             twins.append(path)
-            logs = snap_root / ("_%s" % arm)
+            logs = logs_root / arm
             logs.mkdir(parents=True, exist_ok=True)
-            # The twin's own scratchpad and task output live under /tmp/claude-<uid>/<project folder>.
-            scratch = Path(os.path.realpath("/tmp")) / ("claude-%d" % os.getuid()) / _sanitize(run_cwd)
-            scratch.mkdir(parents=True, exist_ok=True)
             env = {"TWIN_ALLOW": os.pathsep.join([str(snap_root), str(project_dir), str(scratch)]),
                    "TWIN_GUARD_LOG": str(logs / "refused.jsonl"), "TWIN_WAGGLE_LOG": str(logs / "asks.jsonl"),
                    "PITSTOP_HOME": str(logs / "pitstop-home")}
@@ -723,11 +738,13 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
                 record = PendingRecord(checkpoint=str(checkpoint_copy), session_id=twin, cwd=run_cwd,
                                        context_tokens=cycle.done_tokens or 0, created_at=time.time(),
                                        project_dir=str(project_dir), restart="compact")  # transcript = twin
-                delegate = read_is_t3_delegate(str(src))
-                context = resume_context(record, checkpoint_text, cli, delegate=delegate)
+                delegate = bool(read_is_t3_delegate and read_is_t3_delegate(str(src)))
+                context = (resume_context(record, checkpoint_text, cli, delegate=delegate) if read_is_t3_delegate
+                           else resume_context(record, checkpoint_text, cli))
                 # H6: the P arm gets the resume text this version's hook builds (as a user message, not as
                 # additional context; no plan: the cycle log does not keep it).
-                resume_input = {"chars": len(context), "delegate": delegate, "pitstop_root": str(ROOT)}
+                resume_input = {"chars": len(context), "checkpoint_in_input": checkpoint_text.strip() in context,
+                                "delegate": delegate, "pitstop_root": str(ROOT)}
                 prompt = context + "\n\n---\n\n" + message
             try:
                 reply = claude(["--resume", twin] + flags + ["--tools", ARM_TOOLS] + CONT_TURNS, run_cwd,
@@ -744,7 +761,8 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     finally:
         for path in twins:
             remove_twin(path)
-        shutil.rmtree(snap_root, ignore_errors=True)
+        for folder in (snap_root, pristine, logs_root, scratch):
+            shutil.rmtree(folder, ignore_errors=True)
         if project_dir != src.parent and not any(project_dir.iterdir()):
             project_dir.rmdir()  # the twin's own folder, once empty
 

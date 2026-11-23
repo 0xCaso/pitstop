@@ -49,20 +49,19 @@ class GuardTest(unittest.TestCase):
         self.assertIsNone(guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
 
     def test_home_through_variables_or_tilde_is_refused(self):
-        for command in ('cat "$HOME/.claude/x"', "ls ${CLAUDE_CONFIG_DIR}", "cd ~ && cat .claude/x"):
+        for command in ('cat "$HOME/.claude/x"', "ls ${CLAUDE_CONFIG_DIR}", "cd ~ && cat .claude/x",
+                        "cat $TMPDIR/x", "cd / && cat Users/me/f"):
             self.assertIn("outside", guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
 
     def test_heredoc_fed_to_an_interpreter_is_scanned(self):
-        command = "python3 - <<'EOF'\nprint(open('/Users/me/repo/f').read())\nEOF"
-        self.assertIn("/Users/me", guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
-
-    def test_network_words_in_arguments_are_not_commands(self):
-        for command in ("grep -n curl README.md", 'git commit -m "before git push"'):
-            self.assertIsNone(guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
+        for command in ("python3 - <<'EOF'\nprint(open('/Users/me/repo/f').read())\nEOF",
+                        "cat <<EOF | python3\nprint(open('/Users/me/x').read())\nEOF"):
+            self.assertIn("/Users/me", guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
 
     def test_network_and_push_are_refused(self):
         for command in ("git push origin main", "gh pr create", "curl -s https://x.dev", "npm publish",
-                        "cd x && GH_TOKEN=t gh pr create", "echo $(curl -s x.dev)", "git -C repo push"):
+                        "cd x && GH_TOKEN=t gh pr create", "echo $(curl -s x.dev)", "git -C repo push",
+                        "/usr/bin/curl x.dev", 'bash -c "curl x"', "timeout 5 curl x"):
             self.assertIn("no network", guard.decide("Bash", {"command": command}, self.roots, "/snap/c1"))
 
     def test_hook_prints_a_deny_decision_and_logs_it(self):
@@ -110,6 +109,7 @@ class SnapshotTest(unittest.TestCase):
         text = "ls /tmp/s/f ~/.claude/t/a.md /Users/me/p/x /Users/me/p-site/y /Users/me/p."
         self.assertEqual(twin.rewrite(text, mapping),
                          "ls /snap/_ext/s/f /snap/_ext/t/a.md /snap/repo/x /Users/me/p-site/y /snap/repo.")
+        self.assertEqual(twin.rewrite('{"c": "ls\\n/Users/me/p/a"}', mapping), '{"c": "ls\\n/snap/repo/a"}')
 
     def test_outside_paths_keep_named_folders_and_skip_repo_home_and_transcripts(self):
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:  # not /var/folders, which is never copied

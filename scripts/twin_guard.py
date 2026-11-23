@@ -12,12 +12,11 @@ import time
 # Absolute paths a command may name without leaving the snapshot: system tools and throwaway temp files.
 SYSTEM = ("/usr/", "/bin/", "/sbin/", "/opt/homebrew/", "/System/", "/Library/Developer/", "/dev/null", "/dev/std",
           "/Applications/")
-# A network or push command at command position (start, after ; & | ( or $( , after env assignments).
-OUTWARD = re.compile(r"(?:^|[;&|(\n]|\$\(|\b(?:then|do|xargs|exec|command|env|sudo))\s*(?:\w+=\S*\s+)*"
-                     r"(?:git\s+(?:-[Cc]\s+\S+\s+|-\S+\s+)*push|gh\s+(?:pr|issue|release|api|repo)|npm\s+publish|curl|wget|ssh|scp"
-                     r"|rsync)\b")
-# Paths a command reaches without naming them: the home folder and the account folder through variables or ~.
-HIDDEN_PATH = re.compile(r"\$\{?(?:HOME|CLAUDE_CONFIG_DIR)\b|(?<![\w./~-])~(?=$|[\s;&|)'\"`])")
+# Anywhere in the command, so `bash -c "curl …"` or `/usr/bin/curl` are caught too; Bash also runs with no network.
+OUTWARD = re.compile(r"\b(?:git\s+(?:-[Cc]\s+\S+\s+|-\S+\s+)*push|gh\s+(?:pr|issue|release|api|repo)|npm\s+publish"
+                     r"|curl|wget|ssh|scp|rsync)\b")
+# Paths a command reaches without naming them: home, the account and temp folders through variables, ~ or /.
+HIDDEN_PATH = re.compile(r"\$\{?(?:HOME|CLAUDE_CONFIG_DIR|TMPDIR)\b|(?<![\w./~-])[~/](?=$|[\s;&|)'\"`])")
 INTERPRETER = re.compile(r"\b(?:python[\d.]*|node|ruby|perl|php|bash|sh|zsh|osascript|deno|bun)\b")
 PATH_KEYS = ("file_path", "path", "notebook_path")
 HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n.*?\n\s*\1\s*(?:\n|$)", re.DOTALL)
@@ -46,7 +45,7 @@ def decide(tool, tool_input, roots, cwd=None):
     if tool == "Bash":
         command = str(tool_input.get("command") or "")
         # A heredoc body is text written to a file, not paths, unless it feeds an interpreter.
-        command = HEREDOC.sub(lambda m: m.group(0) if INTERPRETER.search(_line_before(m.string, m.start()))
+        command = HEREDOC.sub(lambda m: m.group(0) if INTERPRETER.search(_line_before(m.string, m.start()) + m.group(0).split("\n", 1)[0])
                               else m.group(0).split("\n", 1)[0] + "\n", command)
         if OUTWARD.search(command):
             return "test run: no network, no push"
