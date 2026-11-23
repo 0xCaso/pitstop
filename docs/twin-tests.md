@@ -14,7 +14,8 @@ checkpoint (P). The README shows the latest totals; this file keeps every run. A
 - **Continuation test.** Both twins get the message that really came next. A grader (a model) sees the two first
   replies as X and Y, in random order, next to what the real session did, and picks the better one. It also
   checks whether an owed reply was sent, whether the next action is right (yes, partly, no), and counts wrong
-  claims and missing details.
+  claims and missing details. When both replies take the right step the grader gives a tie, so P's wins cannot
+  reach 100%; from 2026-11-23 the summary also shows "P does not lose" (P wins + ties).
 - **Snapshot.** From the second continuation run on, twins read the repo as it was at the cut (git archive plus
   untracked files under 1 MB older than the cut). Until 2026-11-23 a twin could still read absolute paths of the
   live repo, and then could take a later state as the current one.
@@ -27,6 +28,11 @@ checkpoint (P). The README shows the latest totals; this file keeps every run. A
   session used it in its next steps and the twin neither states it nor shows it has it (P3d). Runs before this
   date are not comparable with later ones, and missing-detail counts before P3d (all runs below this section
   so far, the two 2026-11-23 runs included) are not comparable with counts after it.
+- **Harness from 2026-11-23 (E1-E3).** The outside folders come from every tool call before the cut, not only the
+  last 50. The snapshot keeps uncommitted work (tracked files changed before the cut) and a git history that ends
+  at the commit of the cut. A copied worktree no longer keeps its `.git` pointer to the live repo, whose history
+  goes past the cut. An arm whose `claude -p` fails before any reply runs once more. Record:
+  `docs/decisions/2026-11-23-goal-fixes.md`.
 - **Limits.** Few sessions, all from the author; a model grades. Files changed after the cut are missing from the
   snapshot, not restored to their older content. The P arm gets the resume text as a user message, with no plan
   step (the cycle log does not keep the plan). Script: `scripts/twin.py` (`--versions`, `--main-only`,
