@@ -7,7 +7,7 @@ from pitstop.claude.transcript import (
     read_context_tokens,
     read_last_cwd,
     read_session_title,
-    read_unanswered_messages,
+    read_owed_event,
 )
 from tests.helpers import TempLayoutTestCase, assistant_line, user_line, write_jsonl
 
@@ -126,47 +126,72 @@ def said(text):
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
-def called(name):
+def called(name, tool_id="t"):
     return {"type": "assistant", "isSidechain": False,
-            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": name, "input": {}}]}}
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": tool_id, "name": name, "input": {}}]}}
 
 
-def tool_result():
+def tool_result(content="ok", tool_id="t"):
     return {"type": "user", "isSidechain": False,
-            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]}}
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": content}]}}
 
 
-class ReadUnansweredMessagesTest(TempLayoutTestCase):
-    def count(self, *entries):
-        return read_unanswered_messages(str(write_jsonl(self.tmp / "t.jsonl", list(entries))))
+HAND_BACK = [{"type": "text", "text": "[Subagent hand-back] The text below is the final report of a subagent."}]
+
+
+class ReadOwedEventTest(TempLayoutTestCase):
+    def owed(self, *entries):
+        return read_owed_event(str(write_jsonl(self.tmp / "t.jsonl", list(entries))))
 
     def test_user_message_after_the_last_text_is_owed(self):
-        self.assertEqual(self.count(user_line("a"), said("risposta"), user_line("e poi?"), called("Bash"), tool_result()), 1)
+        self.assertEqual(self.owed(user_line("a"), said("risposta"), user_line("e poi?"), called("Bash"), tool_result()),
+                         "a user message")
 
-    def test_task_notification_counts_as_a_message(self):
+    def test_task_notification_is_owed(self):
         note = user_line("<task-notification>done</task-notification>")
-        self.assertEqual(self.count(said("parto"), note, note), 2)
+        self.assertEqual(self.owed(said("parto"), note), "a task notification")
 
     def test_tool_results_alone_owe_nothing(self):
-        self.assertEqual(self.count(user_line(), said("ok"), called("Read"), tool_result(), called("Bash"), tool_result()), 0)
+        self.assertIsNone(self.owed(user_line(), said("ok"), called("Read"), tool_result(), called("Bash"), tool_result()))
+
+    def test_subagent_result_after_the_last_text_is_owed(self):
+        self.assertEqual(self.owed(said("lancio l'agente"), called("Agent"), tool_result(HAND_BACK), called("Read"),
+                                   tool_result()), "an Agent result")
+
+    def test_background_agent_launch_is_not_a_result(self):
+        launched = [{"type": "text", "text": "Async agent launched successfully. agentId: a1"}]
+        self.assertIsNone(self.owed(said("lancio"), called("Agent"), tool_result(launched)))
+
+    def test_delegate_result_counts_only_when_the_task_ended(self):
+        running = '{"taskId":"node:1","status":"running"}'
+        done = '{"taskId":"node:1","status":"completed","result":"report"}'
+        name = "mcp__t3-code__task_status"
+        self.assertIsNone(self.owed(said("delego"), called(name), tool_result(running)))
+        self.assertEqual(self.owed(said("delego"), called(name), tool_result(done)), "a task_status result")
+
+    def test_reply_after_the_event_owes_nothing(self):
+        self.assertIsNone(self.owed(said("delego"), called("Agent"), tool_result(HAND_BACK), user_line("e il test?"),
+                                    said("ecco il risultato")))
 
     def test_an_ask_tool_after_the_message_is_the_reply(self):
-        self.assertEqual(self.count(said("ok"), user_line("decidi"), called("mcp__plugin_waggle_waggle__waggle_ask"),
-                                    tool_result(), called("Bash"), tool_result()), 0)
+        self.assertIsNone(self.owed(said("ok"), user_line("decidi"), called("mcp__plugin_waggle_waggle__waggle_ask"),
+                                    tool_result(), called("Bash"), tool_result()))
 
-    def test_an_ask_before_the_message_is_not_its_reply(self):
-        self.assertEqual(self.count(said("ok"), called("mcp__plugin_waggle_waggle__waggle_ask"), tool_result(),
-                                    user_line("risposta")), 1)
+    def test_an_ask_before_the_event_is_not_its_reply(self):
+        self.assertEqual(self.owed(said("ok"), called("mcp__plugin_waggle_waggle__waggle_ask", "w"), tool_result(tool_id="w"),
+                                   user_line("risposta")), "a user message")
+        self.assertEqual(self.owed(said("ok"), called("mcp__plugin_waggle_waggle__waggle_ask", "w"), tool_result(tool_id="w"),
+                                   called("Agent", "a"), tool_result(HAND_BACK, "a")), "an Agent result")
 
     def test_meta_and_sidechain_messages_are_ignored(self):
         meta = dict(user_line("caveat"), isMeta=True)
         side = dict(user_line("sub"), isSidechain=True)
-        self.assertEqual(self.count(said("ok"), meta, side), 0)
+        self.assertIsNone(self.owed(said("ok"), meta, side))
 
     def test_none_without_text_since_the_compaction(self):
         boundary = {"type": "system", "subtype": "compact_boundary", "isSidechain": False}
-        self.assertIsNone(self.count(said("prima"), boundary, user_line("riprendi")))
-        self.assertIsNone(self.count(user_line("solo")))
+        self.assertIsNone(self.owed(said("prima"), boundary, user_line("riprendi")))
+        self.assertIsNone(self.owed(user_line("solo")))
 
 
 class DelegateSessionTest(TempLayoutTestCase):

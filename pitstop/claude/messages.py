@@ -142,11 +142,10 @@ def auto_compact_warning(window: int, path: str, threshold: int, hard: int) -> s
                 k(window), path, k(threshold), k(hard), max(400, (hard // 1000 + 99) // 100 * 100)))
 
 
-def owed_reply_reason(unanswered: int) -> str:
-    return ("owed reply: %d message(s) reached you after your last text to the user (a user message, a task "
-            "result or an answer) and got no reply. Send the reply now, or set `Last reply to the user: NOT SENT` "
-            "with the text under Chat-only text, then run mark-pending again. If no reply is owed, run it again "
-            "with --reply-checked." % unanswered)
+def owed_reply_reason(event: str) -> str:
+    return ("owed reply: %s reached you after your last text to the user and got no reply. Send the reply now "
+            "(for a result, one line on what it says is enough), or set `Last reply to the user: NOT SENT` with "
+            "the text under Chat-only text, then run mark-pending again." % event)
 
 
 def previous_transcript(record: PendingRecord) -> Optional[str]:
