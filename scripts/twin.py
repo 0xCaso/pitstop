@@ -482,8 +482,12 @@ def snapshot(cwd: str, cut_ts: float, dest: Path) -> Tuple[str, str]:
     dest.mkdir(parents=True, exist_ok=True)
     top = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     top_dir = top.stdout.strip() if top.returncode == 0 else ""
-    sha = subprocess.run(["git", "-C", top_dir, "log", "--all", "-1", "--format=%H", "--before=@%d" % int(cut_ts)],
-                         capture_output=True, text=True).stdout.strip() if top_dir else ""
+    sha = ""
+    for refs in (["HEAD"], ["--all"]) if top_dir else ():  # this worktree's branch first, not a sibling's
+        sha = subprocess.run(["git", "-C", top_dir, "log", "-1", "--format=%H", "--before=@%d" % int(cut_ts)] + refs,
+                             capture_output=True, text=True).stdout.strip()
+        if sha:
+            break
     archive = subprocess.run(["git", "-C", top_dir, "archive", sha], capture_output=True) if sha else None
     if archive is None or archive.returncode != 0:
         _copy_tree(Path(cwd), dest, cut_ts, [EXT_MAX_FILES * 5])
@@ -504,7 +508,7 @@ def history(top_dir: str, sha: str, dest: Path) -> None:
     at `sha`: `git log` and `git status` there show the repo at the cut. Best effort: no history if a step fails."""
     branch = subprocess.run(["git", "-C", top_dir, "symbolic-ref", "--short", "HEAD"], capture_output=True,
                             text=True).stdout.strip() or "main"
-    steps = [["init", "-q"], ["fetch", "-q", "--no-tags", top_dir, sha],
+    steps = [["init", "-q"], ["fetch", "-q", "--no-tags", "--no-write-fetch-head", top_dir, sha],
              ["update-ref", "refs/heads/" + branch, sha], ["symbolic-ref", "HEAD", "refs/heads/" + branch],
              ["reset", "-q"]]
     for step in steps:
@@ -679,8 +683,13 @@ def pitstop_cli_copy(dest: Path) -> str:
     return str(dest / "bin" / "pitstop")
 
 
+def failed_run(exc: RuntimeError) -> bool:
+    """`claude -p` exited with no JSON result (a crash, not max turns, a timeout or an API error result)."""
+    return str(exc).startswith("claude -p failed")
+
+
 def retry_once(attempt: Callable[[bool], Dict[str, Any]]) -> Dict[str, Any]:
-    """`attempt(False)`, and when it ends with no text at all (`claude -p` failed before any reply), `attempt(True)`
+    """`attempt(False)`, and when it ends with no text because `claude -p` crashed (`failed_run`), `attempt(True)`
     once more, marked `retried` with the first error."""
     first = attempt(False)
     if not first.get("no_text"):
@@ -770,7 +779,7 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
                 compact = claude(["--resume", twin] + flags, run_cwd, config_dir,
                                  "/compact" if arm == "N" else P_COMPACT, env)
             except RuntimeError as exc:
-                if retry:
+                if retry or not failed_run(exc):
                     raise
                 return {"no_text": True, "stopped": str(exc)[:200]}
             cost[arm] += compact.get("total_cost_usd") or 0
@@ -797,7 +806,7 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
                     text, final, stop = last_text(path) or "(no reply)", False, reply.get("subtype") or "no result"
             except RuntimeError as exc:  # max turns, timeout, API error: grade the twin's last text (H3)
                 last = last_text(path)
-                if not last and not retry:
+                if not last and not retry and failed_run(exc):
                     return {"no_text": True, "stopped": str(exc)[:200]}
                 text, turns, final, stop = last or "(no reply)", None, False, str(exc)[:200]
             return {"reply": text, "final_reply": final, "stopped": stop, "turns": turns, "tools": tool_calls(path),
@@ -877,7 +886,7 @@ def cmd_continue_summary(out: Path) -> None:
     wins = {k: sum(1 for r in results if r["grade"]["winner"] == k) for k in ("N", "P", "tie")}
     lines.append("- Winner: P %d · N %d · tie %d" % (wins["P"], wins["N"], wins["tie"]))
     lines.append("- P does not lose (wins + ties): %d of %d" % (wins["P"] + wins["tie"], len(results)))
-    retried = [r["cycle"] for r in results for a in ("N", "P") if r["arms"][a].get("retried")]
+    retried = ["%s %s" % (r["cycle"], a) for r in results for a in ("N", "P") if r["arms"][a].get("retried")]
     if retried:
         lines.append("- Arms run again after a failed `claude -p`: %s" % ", ".join(retried))
     for arm in ("N", "P"):

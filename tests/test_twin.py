@@ -179,6 +179,7 @@ class SnapshotTest(unittest.TestCase):
             log = subprocess.run(["git", "-C", str(dest), "log", "--all", "--format=%s"], capture_output=True,
                                  text=True).stdout.split()
             self.assertEqual(log, ["one"])
+            self.assertFalse((dest / ".git" / "FETCH_HEAD").exists())  # it names the live repo
             status = subprocess.run(["git", "-C", str(dest), "status", "--porcelain"], capture_output=True,
                                     text=True).stdout
             self.assertIn("a.txt", status)
@@ -203,6 +204,9 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(twin.retry_once(attempt), {"reply": "ok", "retried": "claude -p failed (1)"})
         self.assertEqual(calls, [False, True])
         self.assertEqual(twin.retry_once(lambda retry: {"reply": "first"}), {"reply": "first"})
+        self.assertTrue(twin.failed_run(RuntimeError("claude -p failed (1): Error: No deferred tool")))
+        self.assertFalse(twin.failed_run(RuntimeError("claude -p error (error_max_turns): ")))
+        self.assertFalse(twin.failed_run(RuntimeError("claude -p timeout after 1200s")))
 
     def test_summary_shows_p_does_not_lose(self):
         arm = {"tools": []}
@@ -216,7 +220,7 @@ class SnapshotTest(unittest.TestCase):
                 twin.cmd_continue_summary(Path(tmp))
             text = (Path(tmp) / "summary.md").read_text()
         self.assertIn("P does not lose (wins + ties): 2 of 3", text)
-        self.assertIn("failed `claude -p`: c3", text)
+        self.assertIn("failed `claude -p`: c3 P", text)
 
     def test_grader_counts_a_missing_detail_only_if_the_real_session_used_it(self):
         prompt = " ".join(twin.CONT_GRADE_PROMPT.format(limit=twin.TOOL_INPUT_CHARS, cut="c", before="b", after="a",
