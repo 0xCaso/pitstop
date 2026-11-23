@@ -40,6 +40,9 @@ A version is worse when, in a twin test on about 27 cycles:
 - P drops more than 2 owed replies in about 23 cycles that owe one.
 Smaller moves are noise: N moved by 3 cycles between two runs of the same version.
 
+From 2026-11-23 the baseline is the 0.5.2 run on the P2 harness and P3d grader: next action yes 52% (14 of 27,
+`docs/twin-tests.md`), so a version is worse below 42%. The owed-reply rule stays.
+
 ## Open questions
 —
 

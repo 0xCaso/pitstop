@@ -32,6 +32,104 @@ checkpoint (P). The README shows the latest totals; this file keeps every run. A
   step (the cycle log does not keep the plan). Script: `scripts/twin.py` (`--versions`, `--main-only`,
   `--pitstop-root` for the version P gets, `--config-dir` for the account); it reads the author's pitstop log.
 
+## 2026-11-23 · continuation, P2 harness and P3d grader · pitstop 0.5.4 (pre-release) · 27 sessions
+
+The same 27 cycles as the 0.5.3 run, on the current account, with P given the 0.5.4 resume text (`main` after
+#28-#31). Compare with the 0.5.2 baseline right below, not with older runs. Per-cycle reasons:
+`~/.claude/pitstop/twin/tw-054-20261123/summary.md`.
+
+| | N | P |
+|---|---|---|
+| Better first reply | 11 | **14** (2 ties) |
+| Next action yes / partly / no | 12 / 14 / 1 | **13 / 12 / 2** |
+| Owed replies dropped | 1 of 20 | 1 of 20 |
+| Wrong claims | **6** | 7 |
+| Missing details | 13 | **8** |
+| Cost | USD 58.25 | USD 59.35 |
+
+Grading cost USD 5.42; total USD 123.01. Against the 0.5.2 baseline, P's next-action-yes share is 48% (13 of 27)
+against 52%, and it drops 1 owed reply against 1: not worse under the threshold in
+`docs/decisions/2026-11-13-review-policy.md` (more than 10 points, or more than 2 owed replies). N, the same
+native compact in both runs, moved by 4 wins and 3 next-action-yes between the two runs.
+
+| Session | Kind | Context at pitstop | Winner | Next action N / P |
+|---|---|---|---|---|
+| 00f29c561d6d | code | 204K | P | partly / partly |
+| 0cd23dc33b15 | code | 216K | P | yes / yes |
+| 0d57eb504060 | code | 203K | N | partly / no |
+| 1c76ae642515 | code | 213K | N | yes / partly |
+| 1ca7102838bc | code | 273K | P | partly / partly |
+| 2bd3d04ebbde | other | 283K | N | partly / partly |
+| 382cb2050464 | code | 202K | P | partly / yes |
+| 4338cf45596a | other | 204K | P | partly / yes |
+| 4ee042c1fe55 | code | 204K | N | partly / partly |
+| 4f5eb91defa0 | code | 209K | P | partly / yes |
+| 50430f02b816 | code | 239K | P | no / yes |
+| 5f2ee0c10c52 | code | 230K | P | partly / partly |
+| 6d1adf8b029d | other | 222K | N | yes / yes |
+| 8ec1e94bd8e5 | code | 184K | tie | yes / yes |
+| 8ed4590401fd | code | 219K | P | yes / yes |
+| 909c023c6ba1 | code | 207K | P | partly / yes |
+| 951aa4a5589d | code | 190K | P | partly / yes |
+| 9617f0c1098e | code | 210K | N | yes / yes |
+| acc10a738547 | code | 220K | P | yes / yes |
+| b0f51d24c649 | code | 223K | N | yes / partly |
+| b98700370b1d | other | 203K | N | yes / partly |
+| c8f28a50b7f8 | code | 181K | N | yes / partly |
+| d9264f6258b9 | code | 205K | P | partly / partly |
+| e1a094d07f2e | code | 209K | N | partly / no |
+| f2ccff5251ae | other | 202K | tie | partly / partly |
+| f70a6f127d67 | code | 205K | P | yes / yes |
+| f79f10e940c3 | code | 207K | N | yes / partly |
+
+## 2026-11-23 · continuation, P2 harness and P3d grader · pitstop 0.5.2 (new baseline) · 27 sessions
+
+The baseline for later versions: the 0.5.3 run's 27 cycles, on the current account, with P given the resume text
+of a v0.5.2 checkout (`--pitstop-root`). One cycle (5f2ee0c10c52) failed on a missing project folder at the first
+try and passed on a second run. Per-cycle reasons: `~/.claude/pitstop/twin/tw-052-20261123/summary.md`.
+
+| | N | P |
+|---|---|---|
+| Better first reply | 7 | **16** (4 ties) |
+| Next action yes / partly / no | 9 / 18 / 0 | **14 / 12 / 1** |
+| Owed replies dropped | **0 of 20** | 1 of 20 |
+| Wrong claims | 7 | **3** |
+| Missing details | **9** | 11 |
+| Cost | USD 60.67 | USD 59.86 |
+
+Grading cost USD 5.25; total USD 125.78. Missing details fell from 54-64 per arm in older runs to 8-13 with the
+P3d rule. Wrong claims fell too (P: 16 in the 0.5.3 run, 3 here); this run does not show which change caused it.
+
+| Session | Kind | Context at pitstop | Winner | Next action N / P |
+|---|---|---|---|---|
+| 00f29c561d6d | code | 204K | P | partly / partly |
+| 0cd23dc33b15 | code | 216K | N | partly / partly |
+| 0d57eb504060 | code | 203K | P | partly / partly |
+| 1c76ae642515 | code | 213K | N | yes / yes |
+| 1ca7102838bc | code | 273K | N | partly / partly |
+| 2bd3d04ebbde | other | 283K | N | partly / partly |
+| 382cb2050464 | code | 202K | P | yes / yes |
+| 4338cf45596a | other | 204K | P | partly / partly |
+| 4ee042c1fe55 | code | 204K | N | partly / partly |
+| 4f5eb91defa0 | code | 209K | P | partly / yes |
+| 50430f02b816 | code | 239K | P | partly / partly |
+| 5f2ee0c10c52 | code | 230K | P | partly / partly |
+| 6d1adf8b029d | other | 222K | tie | yes / yes |
+| 8ec1e94bd8e5 | code | 184K | tie | yes / yes |
+| 8ed4590401fd | code | 219K | P | yes / yes |
+| 909c023c6ba1 | code | 207K | tie | yes / yes |
+| 951aa4a5589d | code | 190K | P | partly / yes |
+| 9617f0c1098e | code | 210K | P | partly / yes |
+| acc10a738547 | code | 220K | P | yes / yes |
+| b0f51d24c649 | code | 223K | N | yes / yes |
+| b98700370b1d | other | 203K | P | yes / yes |
+| c8f28a50b7f8 | code | 181K | P | partly / yes |
+| d9264f6258b9 | code | 205K | tie | partly / partly |
+| e1a094d07f2e | code | 209K | P | partly / yes |
+| f2ccff5251ae | other | 202K | P | partly / partly |
+| f70a6f127d67 | code | 205K | P | partly / partly |
+| f79f10e940c3 | code | 207K | N | partly / no |
+
 ## 2026-11-23 · continuation with snapshot · pitstop 0.5.3 (pre-release) · 27 sessions
 
 The same cycles as the 0.5.2 check below, with the 0.5.3 resume message (reply language named, no banner for
