@@ -39,7 +39,10 @@ Causes of P's errors (full table, per cycle, kept outside the repo because it qu
 —
 
 ## Open questions
-- Whether the 0.5.3 arm received the checkpoint in two cycles where P gave no banner (H6): P2 checks it.
+- Whether the 0.5.3 arm received the checkpoint in two cycles where P gave no banner (H6). Answered by P2: yes. In
+  `check-053-20261123/` P started from 2.4K more tokens than N in both (951aa4: 45,118 vs 42,717; 9617f0: 46,521
+  vs 44,347), and 9617f0 quotes the checkpoint; the missing banner was the arm's choice. From P2 on each result
+  records `resume_input.checkpoint_in_input`.
 
 ## Sources
 - Case c_88978c47-76e8-41b7-8d19-4c991f62b1d5.

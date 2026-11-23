@@ -16,10 +16,18 @@ checkpoint (P). The README shows the latest totals; this file keeps every run. A
   checks whether an owed reply was sent, whether the next action is right (yes, partly, no), and counts wrong
   claims and missing details.
 - **Snapshot.** From the second continuation run on, twins read the repo as it was at the cut (git archive plus
-  untracked files under 1 MB older than the cut). Known leak: a twin can still read absolute paths of the live
-  repo, and then may take a later state as the current one.
-- **Limits.** Few sessions, all from the author; a model grades; tools are read-only, so a twin cannot redo work.
-  The test script is not published yet.
+  untracked files under 1 MB older than the cut). Until 2026-11-23 a twin could still read absolute paths of the
+  live repo, and then could take a later state as the current one.
+- **Harness from 2026-11-23 (P2).** Twins run with `--restricted`: file tools stay inside the snapshot, and a
+  hook (`scripts/twin_guard.py`) refuses Bash paths outside it, network commands and pushes. Twins have write
+  tools inside the snapshot and a stub Waggle server that records asks and never answers. The snapshot also holds
+  the outside folders (a scratchpad, a data folder) named in the checkpoint and in the last 50 tool calls, with
+  their paths rewritten. A twin gets 40 turns; one with no final reply is graded on its last text. The grader gets
+  the cut time and does not count facts that appear only after it. Runs before this date are not comparable
+  with later ones.
+- **Limits.** Few sessions, all from the author; a model grades. Files changed after the cut are missing from the
+  snapshot, not restored to their older content. Script: `scripts/twin.py` (`--versions`, `--main-only`,
+  `--pitstop-root` for the version P gets, `--config-dir` for the account); it reads the author's pitstop log.
 
 ## 2026-11-23 · continuation with snapshot · pitstop 0.5.3 (pre-release) · 27 sessions
 
