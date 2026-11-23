@@ -198,24 +198,72 @@ class MarkPendingTest(CliTestCase):
                 self.assertTrue(out.startswith("🔋 pitstop · "))
         self.assertIsNone(self.consume())
 
-    def owed_transcript(self):
+    def owed_transcript(self, *after):
         text = {"type": "assistant", "isSidechain": False,
                 "message": {"role": "assistant", "content": [{"type": "text", "text": "fatto"}]}}
-        write_jsonl(self.transcript, [user_line(), text, user_line("e il test?"), assistant_line()])
+        write_jsonl(self.transcript, [user_line(), text] + list(after) + [assistant_line()])
+
+    def delegate_result(self):
+        use = {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "d1", "name": "Agent", "input": {}}]}}
+        result = {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "d1", "content": "[Subagent hand-back] report"}]}}
+        return [use, result]
 
     def test_owed_reply_blocks_the_checkpoint(self):
-        self.owed_transcript()
+        self.owed_transcript(user_line("e il test?"))
         code, out = self.cli("mark-pending", "--stdin", stdin_text="# cp\nLast reply to the user: SENT\n")
         self.assertEqual(code, 1)
-        self.assertIn("owed reply: 1 message(s)", out)
+        self.assertIn("owed reply: a user message reached you after your last text", out)
         self.assertIsNone(self.consume())
 
-    def test_owed_reply_passes_when_not_sent_or_checked(self):
-        self.owed_transcript()
+    def test_reply_checked_does_not_pass_an_event_after_the_last_text(self):
+        # R-MARK was bypassed by re-running with --reply-checked (setup review 2026-11-16, T1).
+        for after, event in ((self.delegate_result(), "an Agent result"), ([user_line("e il test?")], "a user message")):
+            with self.subTest(event=event):
+                self.owed_transcript(*after)
+                code, out = self.cli("mark-pending", "--stdin", "--reply-checked", stdin_text="# cp\n")
+                self.assertEqual(code, 1)
+                self.assertIn("owed reply: %s reached you" % event, out)
+                self.assertIsNone(self.consume())
+
+    def test_a_reply_after_the_last_event_passes(self):
+        reply = {"type": "assistant", "isSidechain": False,
+                 "message": {"role": "assistant", "content": [{"type": "text", "text": "ecco il report"}]}}
+        for flags in ((), ("--reply-checked",)):
+            with self.subTest(flags=flags):
+                self.owed_transcript(*(self.delegate_result() + [user_line("e il test?"), reply]))
+                code, _ = self.cli("mark-pending", "--stdin", *flags, stdin_text="# cp\n")
+                self.assertEqual(code, 0)
+
+    def test_owed_reply_passes_when_not_sent(self):
+        self.owed_transcript(user_line("e il test?"))
         code, _ = self.cli("mark-pending", "--stdin", stdin_text="# cp\nLast reply to the user: NOT SENT\n")
         self.assertEqual(code, 0)
-        code, _ = self.cli("mark-pending", "--stdin", "--reply-checked", stdin_text="# cp\n")
-        self.assertEqual(code, 0)
+
+    def test_incomplete_waggle_case_id_is_refused(self):
+        # A resumed session could not find case c_ab953168 (setup review 2026-11-16, T2).
+        code, out = self.cli("mark-pending", "--stdin", stdin_text="# cp\nWaiting on c_ab953168 in Waggle.\n")
+        self.assertEqual(code, 1)
+        self.assertIn("c_ab953168", out)
+        self.assertIsNone(self.consume())
+        for text in ("# cp\nWaiting on c_77858165-51d7-4afe-a979-f8aceb027ddf.\n", "# cp\nNo case.\n"):
+            with self.subTest(text=text):
+                self.assertEqual(self.cli("mark-pending", "--stdin", stdin_text=text)[0], 0)
+
+    def test_empty_next_action_is_refused(self):
+        # Work done: nothing to resume (setup review 2026-11-16, T3).
+        for body in ("", "—", "  —  \n", "Nothing pending: wait for Matteo.", "Nessuna. Aspettare Matteo.", "- None."):
+            with self.subTest(body=body):
+                code, out = self.cli("mark-pending", "--stdin",
+                                     stdin_text="# cp\n## Goal\nx\n## Next action\n%s\n## Chat-only text\n—\n" % body)
+                self.assertEqual(code, 1)
+                self.assertIn("Next action", out)
+                self.assertIsNone(self.consume())
+        for body in ("Run the tests.", "None of the tests pass yet: fix them.", "Wait for the next scheduled run."):
+            with self.subTest(body=body):
+                code, _ = self.cli("mark-pending", "--stdin", stdin_text="# cp\n## Next action\n%s\n" % body)
+                self.assertEqual(code, 0)
 
     def test_unreadable_context_fails(self):
         write_jsonl(self.transcript, [user_line()])

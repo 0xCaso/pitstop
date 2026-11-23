@@ -85,9 +85,17 @@ class PluginFilesTest(unittest.TestCase):
     def test_skill_lists_the_fixed_skip_categories(self):
         text = SKILL_PATH.read_text(encoding="utf-8")
         self.assertIn("🔋 **pitstop** · skipped: <category> — <reason>", text)
-        for category in ("debugging", "fine-editing", "ending-soon", "background-tasks", "brainstorming", "other"):
+        for category in ("debugging", "fine-editing", "ending-soon", "background-tasks", "brainstorming", "done", "other"):
             with self.subTest(category=category):
                 self.assertIn("`%s`" % category, text)
+
+    def test_skill_has_the_0_5_3_checkpoint_rules(self):
+        text = SKILL_PATH.read_text(encoding="utf-8")
+        for needle in ("Waggle case ids in full", "copy what exists only in chat, an attachment or a temp folder",
+                       "the approved mockup (path + Waggle case id)", "write your final report, not a skip"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+        self.assertNotIn("run it again with `--reply-checked`", text)
 
     def test_skill_documents_metrics_and_report_commands(self):
         text = SKILL_PATH.read_text(encoding="utf-8")
@@ -101,7 +109,7 @@ class ZonesPluginTest(unittest.TestCase):
         text = SKILL_PATH.read_text(encoding="utf-8")
         for needle in ("mode: offer", "mode: hard", "For --kind other",
                        "an offer is not a request and never takes a skip line",
-                       "No exceptions except [background-tasks].",
+                       "No exceptions except [background-tasks] and [done].",
                        "the skip line must not stand alone"):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
@@ -115,7 +123,7 @@ class ZonesPluginTest(unittest.TestCase):
     def test_versions_are_0_5_0(self):
         for path in (REPO_ROOT / "package.json", REPO_ROOT / ".claude-plugin" / "plugin.json"):
             with self.subTest(path=path.name):
-                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.5.2")
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.5.3")
 
 
 class ReviewPluginTest(unittest.TestCase):

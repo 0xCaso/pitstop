@@ -454,7 +454,8 @@ def _resume(inp: HookInput, layout: Layout, notifier: Notifier, config: Config, 
     return build_output(
         output_event,
         system_message=messages.banner_resumed(record.context_tokens),
-        additional_context=messages.resume_context(record, checkpoint_text, cli=str(CLI_PATH)),
+        additional_context=messages.resume_context(record, checkpoint_text, cli=str(CLI_PATH),
+                                                   delegate=read_is_t3_delegate(inp.transcript_path)),
         # Only UserPromptSubmit can set the title; a compacted session keeps its own.
         session_title=messages.badge_title(record.title) if output_event == "UserPromptSubmit" else None,
     )

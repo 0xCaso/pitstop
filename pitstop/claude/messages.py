@@ -1,8 +1,10 @@
 """Everything pitstop says. All of it is English."""
 import os
+import re
 import time
-from typing import Optional
+from typing import List, Optional
 
+from pitstop.core.checkpoint import section
 from pitstop.core.store import PendingRecord
 
 NOTIFY_TITLE = "pitstop"
@@ -110,7 +112,7 @@ def offer_context(tokens: int, soft: int, threshold: int, cwd: str, cli: str, sk
 def hard_request_context(tokens: int, hard: int, step: int, cwd: str, cli: str, skill: str,
                          background_tasks: Optional[int]) -> str:
     head = ("[pitstop] Main-thread context is {k}, past the {hard} hard limit. Pitstop now. Skip only if subagents "
-            "or background tasks are running (category background-tasks).\n")
+            "or background tasks are running (category background-tasks), or the work is done (category done).\n")
     return _request_context(head, "hard", tokens, hard, step, cwd, cli, skill, background_tasks,
                             skip="if you skip, the request comes again at the end of this turn, and after +{step} "
                                  "tokens during it", hard=hard)
@@ -142,11 +144,20 @@ def auto_compact_warning(window: int, path: str, threshold: int, hard: int) -> s
                 k(window), path, k(threshold), k(hard), max(400, (hard // 1000 + 99) // 100 * 100)))
 
 
-def owed_reply_reason(unanswered: int) -> str:
-    return ("owed reply: %d message(s) reached you after your last text to the user (a user message, a task "
-            "result or an answer) and got no reply. Send the reply now, or set `Last reply to the user: NOT SENT` "
-            "with the text under Chat-only text, then run mark-pending again. If no reply is owed, run it again "
-            "with --reply-checked." % unanswered)
+def incomplete_case_ids_reason(ids: List[str]) -> str:
+    return ("Waggle case id not complete: %s. Write each case id in full (c_ plus the whole uuid, as waggle_ask "
+            "returned it), then run mark-pending again." % ", ".join(ids))
+
+
+NEXT_ACTION_EMPTY = ("Next action is empty: the work is done, so there is nothing to resume. Skip the pitstop with "
+                     "category `done` (send your final report, not a skip line, if you are a sub-agent), or write the "
+                     "next action and run mark-pending again.")
+
+
+def owed_reply_reason(event: str) -> str:
+    return ("owed reply: %s reached you after your last text to the user and got no reply. Send the reply now "
+            "(for a result, one line on what it says is enough), or set `Last reply to the user: NOT SENT` with "
+            "the text under Chat-only text, then run mark-pending again." % event)
 
 
 def previous_transcript(record: PendingRecord) -> Optional[str]:
@@ -156,7 +167,43 @@ def previous_transcript(record: PendingRecord) -> Optional[str]:
     return os.path.join(record.project_dir, "%s.jsonl" % record.session_id)
 
 
-def resume_context(record: PendingRecord, checkpoint_text: str, cli: str) -> str:
+_LANGUAGES = {"italian": "Italian", "italiano": "Italian", "english": "English", "inglese": "English",
+              "spanish": "Spanish", "spagnolo": "Spanish", "french": "French", "francese": "French",
+              "german": "German", "tedesco": "German", "portuguese": "Portuguese", "portoghese": "Portuguese"}
+# A rule on the language of replies: "Reply in Italian.", "rispondi sempre in italiano", "Italiano in chat". Rules
+# for asks ("Waggle in italiano") count only when no chat rule is found. Code-language rules ("commits always in
+# English") name no reply, chat or ask, so they do not match.
+_LANG = "(%s)" % "|".join(_LANGUAGES)
+_CHAT_LANGUAGE = re.compile(
+    r"\b(?:repl\w*|answer\w*|chat|rispond\w*|rispost\w*|conversa\w*|scriv\w*)\b[^.\n]{0,40}?\bin\s+%s\b"
+    r"|\b%s\b[^.\n;]{0,20}?\bin\s+chat\b" % (_LANG, _LANG), re.IGNORECASE)
+_ASK_LANGUAGE = re.compile(r"\b(?:waggle|asks?)\b[^.\n]{0,40}?\bin\s+%s\b" % _LANG, re.IGNORECASE)
+# A match is no rule on replies when it is about code ("scrivi i commit in inglese"), negated ("never reply in
+# English") or conditional ("reply in English when I write English"): the language then follows the user.
+_CODE_WORDS = re.compile(r"\b(?:commit\w*|code|codice|PRs?|branch\w*|identifier\w*|comment\w*|commenti)\b", re.IGNORECASE)
+_NEGATION = re.compile(r"\b(?:never|don['\u2019]t|do not|non|mai)\W+(?:\w+\W+)?$", re.IGNORECASE)
+_CONDITIONAL = re.compile(r"^\W*(?:when|if|quando|se)\s+(?:I|io)?\s*(?:write|scrivo)\b", re.IGNORECASE)
+
+
+def _rule_language(pattern: "re.Pattern[str]", text: str) -> Optional[str]:
+    for match in pattern.finditer(text):
+        # The clause before the match, cut at the last sentence or list break.
+        before = re.split(r"[.;\n]", text[max(0, match.start() - 40):match.start()])[-1]
+        after = text[match.end():match.end() + 20]
+        if (_CODE_WORDS.search(before + match.group(0)) or _NEGATION.search(before)
+                or _CONDITIONAL.search(after)):
+            continue
+        return _LANGUAGES[next(g for g in match.groups() if g).lower()]
+    return None
+
+
+def reply_language(checkpoint_text: str) -> Optional[str]:
+    """The language the checkpoint's User preferences ask replies in, in English (e.g. "Italian"), or None."""
+    preferences = section(checkpoint_text, "User preferences")
+    return _rule_language(_CHAT_LANGUAGE, preferences) or _rule_language(_ASK_LANGUAGE, preferences)
+
+
+def resume_context(record: PendingRecord, checkpoint_text: str, cli: str, delegate: bool = False) -> str:
     transcript = previous_transcript(record)
     gap = "`/usr/bin/python3 {cli} gap \"<what was missing>\"`".format(cli=cli)
     if transcript is None:
@@ -165,6 +212,22 @@ def resume_context(record: PendingRecord, checkpoint_text: str, cli: str) -> str
         missing = ("5. If something you need is missing from the checkpoint, look for it in the transcript before "
                    "the restart, %s (Grep it, then Read around the match with an offset), recover it, then run "
                    "%s.\n" % (transcript, gap))
+    language = reply_language(checkpoint_text)
+    if language:
+        where = "in %s (the language used before the restart), in chat and in every ask" % language
+        step4 = "4. Continue from the next action. Write %s, not in the language of this message.\n" % where
+    else:
+        where = "in the language used before the restart"
+        step4 = ("4. Continue from the next action. Write to the user, and in any ask, in the language used before "
+                 "the restart, not the language of this message.\n")
+    if delegate:
+        # F4: a T3 delegate's reply is its parent's result, so a banner there replaces the report.
+        step3 = ("3. You are a sub-agent: print no resume banner and no summary of where you were. Your final reply "
+                 "goes back to the thread that delegated you as its result: make it the report your task asks for, "
+                 "%s.\n" % where)
+    else:
+        step3 = ("3. Print exactly `%s` followed by three short lines %s: goal, current state, next action.\n"
+                 % (resumed_line(record.context_tokens), where))
     base = (
         "[pitstop] This session restarts from a pitstop checkpoint taken at {k}. Checkpoint file: {path}\n"
         "{transcript_line}\n"
@@ -173,11 +236,10 @@ def resume_context(record: PendingRecord, checkpoint_text: str, cli: str) -> str
         "1. Re-read only the files the checkpoint cites that the next action needs. Do not re-explore.\n"
         "2. If the checkpoint says `Last reply to the user: NOT SENT`, send that reply first, from Chat-only text, "
         "before the next action. Never tell the user it was already sent.\n"
-        "3. Print exactly `{line}` followed by three short lines in the language used before the restart: goal, current state, next action.\n"
-        "4. Continue from the next action. Write to the user, and in any ask, in the language used before the "
-        "restart, not the language of this message.\n"
+        "{step3}"
+        "{step4}"
     ).format(k=k(record.context_tokens), path=record.checkpoint, text=checkpoint_text.strip(),
-             line=resumed_line(record.context_tokens),
+             step3=step3, step4=step4,
              transcript_line="Transcript before the restart: %s\n" % transcript if transcript else "")
     base += missing
     if record.plan:

@@ -21,6 +21,104 @@ checkpoint (P). The README shows the latest totals; this file keeps every run. A
 - **Limits.** Few sessions, all from the author; a model grades; tools are read-only, so a twin cannot redo work.
   The test script is not published yet.
 
+## 2026-11-23 · continuation with snapshot · pitstop 0.5.3 (pre-release) · 27 sessions
+
+The same cycles as the 0.5.2 check below, with the 0.5.3 resume message (reply language named, no banner for
+delegates). 2 grader replies could not be parsed (18488bafbe98, 06afa47748c9), so 27. Per-cycle reasons:
+`~/.claude/pitstop/twin/check-053-20261123/summary.md`.
+
+| | N | P |
+|---|---|---|
+| Better first reply | 10 | **15** (2 ties) |
+| Next action yes / partly / no | 10 / 15 / 2 | **15 / 10 / 2** |
+| Owed replies dropped | **1 of 21** | 2 of 21 |
+| Wrong claims | 24 | **16** |
+| Missing details | 58 | **54** |
+| Cost | USD 57.84 | USD 55.93 |
+
+Total USD 118.62. On the same 27 cycles, P on 0.5.2 had: next action yes 14, no 2; owed replies dropped 1 of 22;
+wrong claims 15; missing details 57. N changed more between the two runs (next action yes 7 → 10) than P did.
+
+| Session | Kind | Context at pitstop | Winner | Next action N / P |
+|---|---|---|---|---|
+| 00f29c561d6d | code | 204K | P | partly / yes |
+| 0cd23dc33b15 | code | 216K | N | yes / yes |
+| 0d57eb504060 | code | 203K | P | partly / yes |
+| 1c76ae642515 | code | 213K | P | yes / yes |
+| 1ca7102838bc | code | 273K | P | partly / yes |
+| 2bd3d04ebbde | other | 283K | N | partly / no |
+| 382cb2050464 | code | 202K | P | partly / yes |
+| 4338cf45596a | other | 204K | P | partly / yes |
+| 4ee042c1fe55 | code | 204K | P | partly / yes |
+| 4f5eb91defa0 | code | 209K | N | partly / partly |
+| 50430f02b816 | code | 239K | N | partly / partly |
+| 5f2ee0c10c52 | code | 230K | tie | yes / yes |
+| 6d1adf8b029d | other | 222K | N | yes / yes |
+| 8ec1e94bd8e5 | code | 184K | tie | partly / partly |
+| 8ed4590401fd | code | 219K | P | yes / yes |
+| 909c023c6ba1 | code | 207K | P | yes / yes |
+| 951aa4a5589d | code | 190K | N | yes / yes |
+| 9617f0c1098e | code | 210K | N | yes / partly |
+| acc10a738547 | code | 220K | P | partly / partly |
+| b0f51d24c649 | code | 223K | P | no / partly |
+| b98700370b1d | other | 203K | N | yes / no |
+| c8f28a50b7f8 | code | 181K | P | partly / partly |
+| d9264f6258b9 | code | 205K | P | partly / yes |
+| e1a094d07f2e | code | 209K | P | partly / partly |
+| f2ccff5251ae | other | 202K | P | no / yes |
+| f70a6f127d67 | code | 205K | N | yes / partly |
+| f79f10e940c3 | code | 207K | N | partly / partly |
+
+## 2026-11-23 · continuation with snapshot · pitstop 0.5.2 · 29 sessions (0.5.2 check)
+
+Main sessions only (no T3 delegates), the 30 latest resumed 0.5.2 cycles (24 code, 6 other); one failed in the
+snapshot copy (558be1dfb513, a missing file), so 29. Run with the second account. Per-cycle reasons:
+`~/.claude/pitstop/twin/check-052-20261123/summary.md`.
+
+| | N | P |
+|---|---|---|
+| Better first reply | 11 | **18** |
+| Next action yes / partly / no | 8 / 15 / 6 | **14 / 13 / 2** |
+| Owed replies dropped | 6 of 23 | **1 of 23** |
+| Wrong claims | 35 | **19** |
+| Missing details | 77 | **64** |
+| Cost | USD 60.26 | USD 57.72 |
+
+Grading cost USD 5.24; total USD 123.22. Two N wins come from the snapshot leak (2bd3d04ebbde, e1a094d07f2e:
+P read files written after the cut and took them as the current state).
+
+| Session | Kind | Context at pitstop | Winner | Next action N / P |
+|---|---|---|---|---|
+| 00f29c561d6d | code | 204K | P | partly / yes |
+| 06afa47748c9 | code | 189K | N | partly / partly |
+| 0cd23dc33b15 | code | 216K | P | yes / yes |
+| 0d57eb504060 | code | 203K | N | yes / partly |
+| 18488bafbe98 | other | 287K | N | yes / partly |
+| 1c76ae642515 | code | 213K | N | partly / partly |
+| 1ca7102838bc | code | 273K | P | partly / yes |
+| 2bd3d04ebbde | other | 283K | N | partly / no |
+| 382cb2050464 | code | 202K | P | yes / yes |
+| 4338cf45596a | other | 204K | P | partly / yes |
+| 4ee042c1fe55 | code | 204K | P | no / yes |
+| 4f5eb91defa0 | code | 209K | N | yes / yes |
+| 50430f02b816 | code | 239K | P | partly / yes |
+| 5f2ee0c10c52 | code | 230K | N | partly / partly |
+| 6d1adf8b029d | other | 222K | N | yes / yes |
+| 8ec1e94bd8e5 | code | 184K | P | partly / partly |
+| 8ed4590401fd | code | 219K | P | no / partly |
+| 909c023c6ba1 | code | 207K | P | yes / yes |
+| 951aa4a5589d | code | 190K | P | no / yes |
+| 9617f0c1098e | code | 210K | P | partly / yes |
+| acc10a738547 | code | 220K | P | partly / partly |
+| b0f51d24c649 | code | 223K | P | no / partly |
+| b98700370b1d | other | 203K | P | no / yes |
+| c8f28a50b7f8 | code | 181K | P | no / yes |
+| d9264f6258b9 | code | 205K | N | partly / partly |
+| e1a094d07f2e | code | 209K | N | yes / no |
+| f2ccff5251ae | other | 202K | P | partly / partly |
+| f70a6f127d67 | code | 205K | N | partly / partly |
+| f79f10e940c3 | code | 207K | P | partly / partly |
+
 ## 2026-11-10 · continuation with snapshot · pitstop 0.5.0 · 10 sessions
 
 | | N | P |

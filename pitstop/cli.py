@@ -16,7 +16,7 @@ from pitstop.claude.report_scan import calls_after, projects_dirs, skip_categori
 from pitstop.claude.review_scan import AFTER_CHARS, BEFORE_CHARS, chat_excerpt
 from pitstop.claude.settings import lowest_auto_compact_window, settings_files
 from pitstop.claude.transcript import (
-    read_unanswered_messages,
+    read_owed_event,
     TranscriptSchemaError,
     default_projects_dir,
     find_transcript,
@@ -25,7 +25,7 @@ from pitstop.claude.transcript import (
     read_session_title,
 )
 from pitstop.core.build import new_cycle_id
-from pitstop.core.checkpoint import analyze_checkpoint
+from pitstop.core.checkpoint import analyze_checkpoint, incomplete_case_ids, next_action_empty
 from pitstop.core.config import _INT_RANGES, ConfigError, load_config, update_config
 from pitstop.core.cycles import Cycle, build_cycles, next_start
 from pitstop.core.fsutil import append_line, atomic_write_text
@@ -156,14 +156,20 @@ def cmd_mark_pending(args: argparse.Namespace, ctx: Ctx) -> None:
         if checkpoint.stat().st_size == 0:
             raise CliError("empty checkpoint: %s" % checkpoint)
         text = checkpoint.read_text(encoding="utf-8", errors="replace")
-    # R-MARK: a message that reached the session after its last text, unanswered, means a reply is owed.
-    if not args.reply_checked and not OWED_MARK.search(text):
+    # R-MARK: an event that reached the session after its last text, unanswered, means a reply is owed.
+    # --reply-checked no longer skips this (setup review 2026-11-16, T1): only a reply after the event does.
+    if not OWED_MARK.search(text):
         try:
-            unanswered = read_unanswered_messages(str(transcript))
+            event = read_owed_event(str(transcript))
         except OSError:
-            unanswered = None
-        if unanswered:
-            raise CliError(messages.owed_reply_reason(unanswered))
+            event = None
+        if event:
+            raise CliError(messages.owed_reply_reason(event))
+    bad_ids = incomplete_case_ids(text)
+    if bad_ids:
+        raise CliError(messages.incomplete_case_ids_reason(bad_ids))
+    if next_action_empty(text):
+        raise CliError(messages.NEXT_ACTION_EMPTY)
     # Checked before anything is written: a checkpoint that cites files the resume cannot find is fixed first.
     stats = analyze_checkpoint(text, cwd, str(ctx.layout.checkpoints_dir))
     if stats.missing:
@@ -453,7 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     mark.add_argument("--plan")
     mark.add_argument("--kind", choices=["code", "other"], help="code: the work lives in the repo's files")
     mark.add_argument("--reply-checked", action="store_true",
-                      help="no reply is owed although messages came after the last text to the user")
+                      help="kept for older skill text; a reply after the last event is still required")
     mark.add_argument("--session")
     mark.add_argument("--transcript")
     gap = sub.add_parser("gap", help="record something the checkpoint was missing")

@@ -2,6 +2,7 @@ import dataclasses
 import unittest
 
 from pitstop.claude.messages import (
+    reply_language,
     badge_title,
     banner_resumed,
     banner_triggered,
@@ -78,6 +79,45 @@ class PreviousTranscriptTest(unittest.TestCase):
         text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop")
         self.assertIn("in the language used before the restart, not the language of this message", text)
 
+    def test_resume_context_names_the_language_from_user_preferences(self):
+        # Resumed sessions switched to English with an Italian rule in the checkpoint (setup review 2026-11-16, T4).
+        cp = "# cp\n## User preferences\n- \"Code and commits always in English.\"\n- \"Reply in Italian.\"\n## Re-read\n—\n"
+        text = resume_context(RECORD, cp, cli="/x/bin/pitstop")
+        step3 = text.split("\n3. ", 1)[1].split("\n", 1)[0]
+        step4 = text.split("\n4. ", 1)[1].split("\n", 1)[0]
+        for step in (step3, step4):
+            self.assertIn("in Italian (the language used before the restart), in chat and in every ask", step)
+        self.assertNotIn("in English (the language", text)
+
+    def test_resume_context_reads_an_italian_wording_of_the_rule(self):
+        for rule in ("rispondi sempre in italiano", "Italiano in chat; Waggle in ASD-STE100", "Waggle in italiano"):
+            with self.subTest(rule=rule):
+                cp = "# cp\n## User preferences\n- %s\n" % rule
+                self.assertIn("in Italian (the language used before the restart)", resume_context(RECORD, cp, cli="/x"))
+        cp = "# cp\n## User preferences\n- Code, commits and PRs always in English.\n"
+        self.assertIn("in the language used before the restart, not the language", resume_context(RECORD, cp, cli="/x"))
+
+    def test_reply_language_skips_code_negated_and_conditional_rules(self):
+        # fresh-review 2026-11-23: these read as "English" and told Italian sessions to write English.
+        cases = {"Scrivi i commit in inglese; rispondi in italiano.": "Italian",
+                 "scrivi commit e PR in inglese": None,
+                 "Never reply in English.": None,
+                 "Reply in English when I write English, Italian when I write Italian.": None,
+                 "scrivi in italiano": "Italian",
+                 "Do not push.\n- Reply in Italian.": "Italian",
+                 "Commit e PR: scrivi in inglese. Rispondi in italiano.": "Italian",
+                 "Don\u2019t reply in English; reply in Italian.": "Italian"}
+        for rule, want in cases.items():
+            with self.subTest(rule=rule):
+                self.assertEqual(reply_language("# cp\n## User preferences\n- %s\n" % rule), want)
+
+    def test_resume_context_of_a_delegate_has_no_banner(self):
+        # F4 (docs/feedback/2026-11-23-pitstop-quando-non-partire.md): the parent got the banner, not the report.
+        text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop", delegate=True)
+        self.assertNotIn("resumed from 212K", text)
+        self.assertIn("sub-agent", text)
+        self.assertIn("goes back to the thread that delegated you", text)
+
     def test_resume_context_points_to_the_previous_transcript(self):
         record = dataclasses.replace(RECORD, project_dir="/p")
         self.assertEqual(previous_transcript(record), "/p/s1.jsonl")
@@ -105,6 +145,6 @@ class ZoneMessagesTest(unittest.TestCase):
         text = hard_request_context(285000, 280000, 50000, "/w", "/cli", "/skill", 2)
         self.assertTrue(text.startswith(
             "[pitstop] Main-thread context is 285K, past the 280K hard limit. Pitstop now. Skip only if subagents or "
-            "background tasks are running (category background-tasks).\n"))
+            "background tasks are running (category background-tasks), or the work is done (category done).\n"))
         self.assertIn("- mode: hard\n", text)
         self.assertIn("- background tasks running: 2\n", text)

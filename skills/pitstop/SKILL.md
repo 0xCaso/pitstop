@@ -46,8 +46,9 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
 1. **When.** Mode `conversation`: now. Mode `superpowers`: finish the current step up to the boundary named in
    the message, then come back here before starting anything new.
    - `mode: offer` (the soft zone, before the threshold): Pitstop only at a natural boundary (a task done, a commit made, an answer finished) and only if more work is left. If the Next action would be "nothing pending" or "wait for the user", carry on and print nothing: an offer is not a request and never takes a skip line, and the hard request still comes if the session goes on.
-   - `mode: hard` (past the hard limit): No exceptions except [background-tasks]. Run the "Checkpoint procedure" now.
-     If subagents or background tasks are running, skip with category `background-tasks`; the request comes back.
+   - `mode: hard` (past the hard limit): No exceptions except [background-tasks] and [done]. Run the "Checkpoint
+     procedure" now. If subagents or background tasks are running, skip with category `background-tasks`; the
+     request comes back.
 2. **Exceptions** (modes `conversation` and `superpowers`). Skip the pitstop when any of these applies (its
    category in brackets):
    - a debugging session is half-way (discarded hypotheses and observed output live only in this context)
@@ -56,11 +57,14 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    - the work ends within about ten exchanges [`ending-soon`];
    - subagents or background tasks are still running [`background-tasks`];
    - a brainstorming or grilling session is half-way [`brainstorming`];
+   - the work is done: the Next action would be empty, "nothing pending" or "wait for the user" [`done`]. If you
+     are a sub-agent (a T3 delegate, or your task came from another session), write your final report, not a skip
+     line in its place: that report is what the session that delegated you receives;
    - another reason [`other`].
 
    When in doubt, skip. To skip, print exactly this line and carry on normally:
    `🔋 **pitstop** · skipped: <category> — <reason>`
-   `<category>` is one of the six above, as written; `<reason>` is a few words of your own.
+   `<category>` is one of the seven above, as written; `<reason>` is a few words of your own.
    If the request came at the end of a turn, after your reply was written, the skip line must not stand alone:
    hosts like T3 Code fold every message but the last one. Under it, repeat the reply's closing status lines
    (done, next, needs you), or its last paragraph if it has none.
@@ -88,9 +92,9 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    - `--cwd <cwd>` for an automatic pitstop; `--plan <plan path>` when a superpowers plan is being executed.
    - If it exits non-zero because files under "Re-read" were not found, fix those entries and run it once more.
      A `warning: not checked under Re-read` line is only a notice: carry on.
-   - If it exits non-zero with `owed reply:`, messages came after your last text to the user: send that reply
-     now (or set the line to NOT SENT with the text under Chat-only text), then run it once more. If no reply is
-     owed, run it again with `--reply-checked`.
+   - If it exits non-zero with `owed reply:`, a message or a result (a subagent report, a delegate that ended)
+     came after your last text to the user: send that reply now (for a result, one line on what it says), or set
+     the line to NOT SENT with the text under Chat-only text, then run it once more.
    - Any other non-zero exit (not `owed reply:`), or a second failure: print `🔋 **pitstop** · failed: <its reason> → continuing here`
      and stop the procedure.
 
@@ -178,9 +182,14 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
   none. With `--kind other` (research, writing, strategy) most of the state lives here: fill it first.
 - For --kind other the state lives in the chat: put the tables, lists, figures and sources the next action needs under "Chat-only text" word for word, and when they pass about 1K tokens save them to a support file and cite it.
 - Exact strings the remaining work needs (commands that worked, ids, model names, paths, error text, the option
-  texts of a choice the user made) go word for word, never as a description. Commands that the Next action and
-  the remaining steps run again (build, render, screenshot, dev server, migration) go word for word with all
-  their arguments.
+  texts of a choice the user made) go word for word, never as a description. Write Waggle case ids in full
+  (`c_` plus the whole uuid): mark-pending refuses a shortened one. Commands that the Next action and the
+  remaining steps run again (build, render, screenshot, dev server, migration) go word for word with all their
+  arguments.
+- Exact strings: absolute path or exact command of every script, command, draft or data the work made or relies
+  on; copy what exists only in chat, an attachment or a temp folder.
+- Name the approved mockup (path + Waggle case id) and the feedback ledger file with its open ids when the work
+  follows them.
 - Mark with `(assumed)` a fact you did not check in a file, a command output or the user's words.
 - Leave out secrets, tokens, passwords and personal data.
 - Write `—` under an empty section.
