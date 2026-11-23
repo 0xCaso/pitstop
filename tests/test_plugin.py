@@ -108,8 +108,9 @@ class ZonesPluginTest(unittest.TestCase):
     def test_skill_has_offer_and_hard_modes_and_chat_heavy_checkpoints(self):
         text = SKILL_PATH.read_text(encoding="utf-8")
         for needle in ("mode: offer", "mode: hard", "For --kind other",
-                       "an offer is not a request and needs no skip line",
-                       "No exceptions except [background-tasks] and [done]."):
+                       "an offer is not a request and never takes a skip line",
+                       "No exceptions except [background-tasks] and [done].",
+                       "the skip line must not stand alone"):
             with self.subTest(needle=needle):
                 self.assertIn(needle, text)
 

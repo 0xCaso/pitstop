@@ -45,7 +45,7 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
 
 1. **When.** Mode `conversation`: now. Mode `superpowers`: finish the current step up to the boundary named in
    the message, then come back here before starting anything new.
-   - `mode: offer` (the soft zone, before the threshold): Pitstop only at a natural boundary (a task done, a commit made, an answer finished) and only if more work is left. If the Next action would be "nothing pending" or "wait for the user", carry on and print nothing: an offer is not a request and needs no skip line, and the hard request still comes if the session goes on.
+   - `mode: offer` (the soft zone, before the threshold): Pitstop only at a natural boundary (a task done, a commit made, an answer finished) and only if more work is left. If the Next action would be "nothing pending" or "wait for the user", carry on and print nothing: an offer is not a request and never takes a skip line, and the hard request still comes if the session goes on.
    - `mode: hard` (past the hard limit): No exceptions except [background-tasks] and [done]. Run the "Checkpoint
      procedure" now. If subagents or background tasks are running, skip with category `background-tasks`; the
      request comes back.
@@ -65,6 +65,9 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    When in doubt, skip. To skip, print exactly this line and carry on normally:
    `🔋 **pitstop** · skipped: <category> — <reason>`
    `<category>` is one of the seven above, as written; `<reason>` is a few words of your own.
+   If the request came at the end of a turn, after your reply was written, the skip line must not stand alone:
+   hosts like T3 Code fold every message but the last one. Under it, repeat the reply's closing status lines
+   (done, next, needs you), or its last paragraph if it has none.
 3. Otherwise run the "Checkpoint procedure" with `--cwd <cwd from the message>`.
 
 ## Manual pitstop
