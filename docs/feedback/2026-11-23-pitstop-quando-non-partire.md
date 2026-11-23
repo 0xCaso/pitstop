@@ -8,8 +8,8 @@ Fonte: risposta Waggle al caso c_67448f93-474b-4488-b30a-27e948691afe (weekly se
 |---|---|---|
 | F1 | Verificare se un pitstop è partito mentre dei sub-agenti lavoravano, e se ha causato problemi. | done: 0 casi (vedi S1) |
 | F2 | Verificare se un pitstop è partito con una scelta Waggle aperta che poi la sessione ripresa non ha ripreso. | done: 0 scelte perse (vedi S1) |
-| F3 | Se succede: capire come gestirlo al meglio, così che pitstop non parta quando può rompere lavoro in corso (sub-agenti, scelte Waggle, simili). | open: solo per F4 |
-| F4 | (trovato in S1) Un thread delegato fa pitstop a fine lavoro: il padre riceve come risultato il banner di ripresa più lo stato, non il rapporto. | open |
+| F3 | Se succede: capire come gestirlo al meglio, così che pitstop non parta quando può rompere lavoro in corso (sub-agenti, scelte Waggle, simili). | done: solo F4 serviva (commit 3469679, d4df2b2) |
+| F4 | (trovato in S1) Un thread delegato fa pitstop a fine lavoro: il padre riceve come risultato il banner di ripresa più lo stato, non il rapporto. | done: categoria `done` + rapporto finale (SKILL.md), Next action vuota rifiutata, ripresa di un delegate senza banner (`resume_context(delegate=True)`); da verificare dopo il rilascio |
 
 ## S1 · 2026-11-23
 
