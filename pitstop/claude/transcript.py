@@ -195,6 +195,9 @@ def _hands_back(name: str, block: Dict[str, Any]) -> bool:
     return bool(_ENDED.search(text.replace('\\"', '"')))
 
 
+_PITSTOP_COMMAND = re.compile(r"<command-name>/pitstop(?::pitstop)?</command-name>")
+
+
 def read_owed_event(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Optional[str]:
     """The last event that reached the main thread after its last text to the user and got no reply, or None.
 
@@ -239,6 +242,8 @@ def read_owed_event(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Op
                         event = "%s %s result" % ("an" if tool[:1] in "AEIOU" else "a", tool)
             elif _has_text(blocks):
                 text = "\n".join(str(b.get("text", "")) for b in blocks if b.get("type") == "text").lstrip()
+                if _PITSTOP_COMMAND.search(text[:400]):
+                    continue  # /pitstop itself: the checkpoint it asks for is the reply.
                 notice = text.startswith("<task-notification>") or "[SYSTEM NOTIFICATION" in text[:200]
                 event = "a task notification" if notice else "a user message"
     return event
