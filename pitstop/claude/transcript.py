@@ -172,14 +172,37 @@ def _has_text(blocks: list) -> bool:
     return any(b.get("type") == "text" and str(b.get("text", "")).strip() for b in blocks)
 
 
-def read_unanswered_messages(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Optional[int]:
-    """How many user or task messages reached the main thread after its last text to the user, when none
-    was answered since: the last one came after any reply sent through an ask tool (Waggle).
+# Tools whose result hands work back to the session: a sync subagent's report, or a T3 delegate that ended.
+_RESULT_TOOLS = ("Agent", "Task", "delegate_task", "task_status", "t3_thread_wait")
+_ENDED = re.compile(r'"status"\s*:\s*"(?:completed|failed|interrupted|cancelled|canceled)"')
 
-    0 means nothing is owed by this measure. None when no text to the user is found since the last
-    compaction. Tool results alone do not count: reading files to write a checkpoint is normal."""
-    messages_after = 0
-    replied = False  # a reply tool was called after the latest message
+
+def _result_text(block: Dict[str, Any]) -> str:
+    content = block.get("content")
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict))
+    return str(content or "")
+
+
+def _hands_back(name: str, block: Dict[str, Any]) -> bool:
+    """A tool result that brings work back: a subagent report (not a background launch), or a delegate that ended."""
+    tool = name.rsplit("__", 1)[-1]
+    if tool not in _RESULT_TOOLS:
+        return False
+    text = _result_text(block)
+    if tool in ("Agent", "Task"):
+        return "Async agent launched" not in text
+    return bool(_ENDED.search(text.replace('\\"', '"')))
+
+
+def read_owed_event(transcript_path: str, max_bytes: int = MAX_SCAN_BYTES) -> Optional[str]:
+    """The last event that reached the main thread after its last text to the user and got no reply, or None.
+
+    Events: a user or task message, and a tool result that hands work back (a subagent report, a delegate that
+    ended). A reply is a text to the user or an ask tool (Waggle) after the event. Plain tool results are not
+    events: reading files to write a checkpoint is normal. None also when no text to the user is found since the
+    last compaction."""
+    tail = []
     for line in _lines_from_end(transcript_path, max_bytes):
         try:
             entry = json.loads(line)
@@ -187,23 +210,38 @@ def read_unanswered_messages(transcript_path: str, max_bytes: int = MAX_SCAN_BYT
             continue
         if not isinstance(entry, dict) or entry.get("isSidechain") is True:
             continue
-        kind = entry.get("type")
-        if kind == "system" and entry.get("subtype") == "compact_boundary":
+        if entry.get("type") == "system" and entry.get("subtype") == "compact_boundary":
             return None
+        if entry.get("type") == "assistant" and _has_text(_blocks(entry.get("message"))):
+            break
+        tail.append(entry)
+    else:
+        return None
+    names: Dict[str, str] = {}
+    event: Optional[str] = None
+    for entry in reversed(tail):
         blocks = _blocks(entry.get("message"))
-        if kind == "assistant":
-            if _has_text(blocks):
-                return messages_after
-            if messages_after == 0 and any(b.get("type") == "tool_use" and str(b.get("name", "")).endswith(_REPLY_TOOLS)
-                                           for b in blocks):
-                replied = True
-        elif kind == "user" and entry.get("isMeta") is not True:
-            if any(b.get("type") == "tool_result" for b in blocks) or not _has_text(blocks):
-                continue
-            if messages_after == 0 and replied:
-                return 0
-            messages_after += 1
-    return None
+        if entry.get("type") == "assistant":
+            for b in blocks:
+                if b.get("type") != "tool_use":
+                    continue
+                name = str(b.get("name", ""))
+                names[str(b.get("id"))] = name
+                if name.endswith(_REPLY_TOOLS):
+                    event = None
+        elif entry.get("type") == "user" and entry.get("isMeta") is not True:
+            results = [b for b in blocks if b.get("type") == "tool_result"]
+            if results:
+                for b in results:
+                    name = names.get(str(b.get("tool_use_id")), "")
+                    if _hands_back(name, b):
+                        tool = name.rsplit("__", 1)[-1]
+                        event = "%s %s result" % ("an" if tool[:1] in "AEIOU" else "a", tool)
+            elif _has_text(blocks):
+                text = "\n".join(str(b.get("text", "")) for b in blocks if b.get("type") == "text").lstrip()
+                notice = text.startswith("<task-notification>") or "[SYSTEM NOTIFICATION" in text[:200]
+                event = "a task notification" if notice else "a user message"
+    return event
 
 
 def read_tool_inputs_naming(transcript_path: str, start: int, needle: str,

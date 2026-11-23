@@ -85,9 +85,9 @@ A `[pitstop]` hook message gives you: mode, context, cwd, background tasks, and 
    - `--cwd <cwd>` for an automatic pitstop; `--plan <plan path>` when a superpowers plan is being executed.
    - If it exits non-zero because files under "Re-read" were not found, fix those entries and run it once more.
      A `warning: not checked under Re-read` line is only a notice: carry on.
-   - If it exits non-zero with `owed reply:`, messages came after your last text to the user: send that reply
-     now (or set the line to NOT SENT with the text under Chat-only text), then run it once more. If no reply is
-     owed, run it again with `--reply-checked`.
+   - If it exits non-zero with `owed reply:`, a message or a result (a subagent report, a delegate that ended)
+     came after your last text to the user: send that reply now (for a result, one line on what it says), or set
+     the line to NOT SENT with the text under Chat-only text, then run it once more.
    - Any other non-zero exit (not `owed reply:`), or a second failure: print `🔋 **pitstop** · failed: <its reason> → continuing here`
      and stop the procedure.
 
