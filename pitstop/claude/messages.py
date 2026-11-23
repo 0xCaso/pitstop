@@ -181,14 +181,17 @@ _ASK_LANGUAGE = re.compile(r"\b(?:waggle|asks?)\b[^.\n]{0,40}?\bin\s+%s\b" % _LA
 # A match is no rule on replies when it is about code ("scrivi i commit in inglese"), negated ("never reply in
 # English") or conditional ("reply in English when I write English"): the language then follows the user.
 _CODE_WORDS = re.compile(r"\b(?:commit\w*|code|codice|PRs?|branch\w*|identifier\w*|comment\w*|commenti)\b", re.IGNORECASE)
-_NEGATION = re.compile(r"\b(?:never|not|don't|do not|non|mai)\W+(?:\w+\W+)?$", re.IGNORECASE)
+_NEGATION = re.compile(r"\b(?:never|don['\u2019]t|do not|non|mai)\W+(?:\w+\W+)?$", re.IGNORECASE)
 _CONDITIONAL = re.compile(r"^\W*(?:when|if|quando|se)\s+(?:I|io)?\s*(?:write|scrivo)\b", re.IGNORECASE)
 
 
 def _rule_language(pattern: "re.Pattern[str]", text: str) -> Optional[str]:
     for match in pattern.finditer(text):
-        before, after = text[max(0, match.start() - 20):match.start()], text[match.end():match.end() + 20]
-        if _CODE_WORDS.search(match.group(0)) or _NEGATION.search(before) or _CONDITIONAL.search(after):
+        # The clause before the match, cut at the last sentence or list break.
+        before = re.split(r"[.;\n]", text[max(0, match.start() - 40):match.start()])[-1]
+        after = text[match.end():match.end() + 20]
+        if (_CODE_WORDS.search(before + match.group(0)) or _NEGATION.search(before)
+                or _CONDITIONAL.search(after)):
             continue
         return _LANGUAGES[next(g for g in match.groups() if g).lower()]
     return None

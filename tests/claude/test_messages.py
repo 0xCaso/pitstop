@@ -103,7 +103,10 @@ class PreviousTranscriptTest(unittest.TestCase):
                  "scrivi commit e PR in inglese": None,
                  "Never reply in English.": None,
                  "Reply in English when I write English, Italian when I write Italian.": None,
-                 "scrivi in italiano": "Italian"}
+                 "scrivi in italiano": "Italian",
+                 "Do not push.\n- Reply in Italian.": "Italian",
+                 "Commit e PR: scrivi in inglese. Rispondi in italiano.": "Italian",
+                 "Don\u2019t reply in English; reply in Italian.": "Italian"}
         for rule, want in cases.items():
             with self.subTest(rule=rule):
                 self.assertEqual(reply_language("# cp\n## User preferences\n- %s\n" % rule), want)
