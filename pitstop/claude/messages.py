@@ -174,8 +174,9 @@ _LANGUAGES = {"italian": "Italian", "italiano": "Italian", "english": "English",
 # for asks ("Waggle in italiano") count only when no chat rule is found. Code-language rules ("commits always in
 # English") name no reply, chat or ask, so they do not match.
 _LANG = "(%s)" % "|".join(_LANGUAGES)
-_CHAT_LANGUAGE = re.compile(r"\b(?:repl\w*|answer\w*|chat|rispond\w*|rispost\w*|conversa\w*|scriv\w*)\b[^.\n]{0,40}?\bin\s+%s\b"
-                            r"|\b%s\b[^.\n;]{0,20}?\bin\s+chat\b" % (_LANG, _LANG), re.IGNORECASE)
+_CHAT_LANGUAGE = re.compile(
+    r"\b(?:repl\w*|answer\w*|chat|rispond\w*|rispost\w*|conversa\w*|scriv\w*)\b[^.\n]{0,40}?\bin\s+%s\b"
+    r"|\b%s\b[^.\n;]{0,20}?\bin\s+chat\b" % (_LANG, _LANG), re.IGNORECASE)
 _ASK_LANGUAGE = re.compile(r"\b(?:waggle|asks?)\b[^.\n]{0,40}?\bin\s+%s\b" % _LANG, re.IGNORECASE)
 
 
