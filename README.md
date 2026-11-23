@@ -55,7 +55,8 @@ pitstop and auto-compact work together: leave auto-compact on as a safety net ab
 1. The context passes the threshold. pitstop asks Claude to stop at the next clean point. Before that, in the soft
    zone, it offers a pitstop once at the end of a turn, taken only at a natural boundary with work still left (when the
    work is done and nothing is pending, it skips). Past the hard limit it
-   asks at the end of every turn, and Claude skips only while subagents or background tasks are running.
+   asks at the end of every turn, and Claude skips only while subagents are running. While background tasks run,
+   `Stop` asks nothing: Claude could only skip, and a lone skip line would fold the reply above it in T3 Code.
 2. Claude writes the checkpoint and prints `🔋 pitstop · done at 226K → back on track with a clean context`.
 3. The session restarts:
    - **Terminal:** on a Claude Code that loads hooks modules, pitstop runs `/compact` when the turn ends and
@@ -187,8 +188,8 @@ An invalid file turns pitstop off and says why once, until the file changes.
 
 - `Stop` and `PostToolBatch` hooks read the context size from the session transcript. In the soft zone `Stop`
   offers a pitstop once. Past the threshold they ask Claude for a pitstop, once per segment. Past the hard limit
-  `Stop` blocks the end of the turn until Claude does the pitstop, unless background tasks are running, a
-  checkpoint already waits for its restart, or the session runs under `claude -p`. A context
+  `Stop` blocks the end of the turn until Claude does the pitstop, unless a checkpoint already waits for its
+  restart or the session runs under `claude -p`. `Stop` stays silent in every zone while background tasks run. A context
   back under the soft limit (a `/compact` outside pitstop) starts a new segment.
 - The `pitstop` skill writes and registers the checkpoint in one call to the `bin/pitstop` CLI, then restarts the
   session. The CLI refuses a checkpoint that cites, under Re-read, a file that does not exist, so Claude fixes it

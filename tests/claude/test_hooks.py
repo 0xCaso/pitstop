@@ -116,10 +116,19 @@ class StopHookTest(PendingMixin, HookTestCase):
         self.assertIsNotNone(self.call_hook("stop"))
         self.assertEqual(self.notes, [])
 
-    def test_background_tasks_are_reported(self):
-        self.add_turn(212345)
-        out = self.call_hook("stop", background_tasks=[{"id": "a"}])
-        self.assertIn("background tasks running: 1", out["hookSpecificOutput"]["additionalContext"])
+    def test_stop_with_background_tasks_waits_silently_in_every_zone(self):
+        # Claude could only skip, and that skip line would become the turn's last message: T3 Code folds the reply
+        # above it. The next Stop with nothing running asks as usual.
+        for tokens in (175000, 212345, 285000):
+            self.add_turn(tokens)
+            self.assertIsNone(self.call_hook("stop", background_tasks=[{"id": "a"}]))
+        self.assertEqual(self.notes, [])
+        events = read_events(self.layout)
+        self.assertEqual([e["action"] for e in events], ["deferred"] * 3)
+        self.assertEqual(events[0]["background_tasks"], 1)
+        self.assertNotIn("cycle_id", events[0])
+        out = self.call_hook("stop")
+        self.assertEqual(out["decision"], "block")
 
     def test_stop_in_soft_zone_offers_once(self):
         self.add_turn(175000)
@@ -156,14 +165,6 @@ class StopHookTest(PendingMixin, HookTestCase):
         self.assertIn("mode: hard", out["reason"])
         self.assertEqual(out["systemMessage"], "🔋 pitstop · 285K → past the hard limit, pitstop now")
         self.assertEqual(len(self.notes), 1)
-
-    def test_stop_past_hard_with_background_tasks_does_not_block(self):
-        self.add_turn(285000)
-        out = self.call_hook("stop", background_tasks=[{"id": "a"}])
-        self.assertNotIn("decision", out)
-        context = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("past the 280K hard limit", context)
-        self.assertIn("background tasks running: 1", context)
 
     def test_stop_hook_active_never_blocks_twice(self):
         self.add_turn(285000)
