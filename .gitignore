@@ -10,3 +10,6 @@ __pycache__/
 
 # Waggle staging (exports sent for review)
 .waggle/
+
+# Scrawl and Hex captures stay out of git (recordings, screenshots, private details)
+docs/feedback/scrawl/
