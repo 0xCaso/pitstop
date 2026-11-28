@@ -25,6 +25,9 @@ with what was owed before the cut and what really happened after the resume. The
 - get 40 turns; a twin with no final reply is graded on its last text (H3);
 - the snapshot holds the repo at the cut plus the outside folders named in the checkpoint and in the last 50 tool
   calls, under `_ext/` with the paths rewritten (H5).
+From 2026-11-23 (E1-E3 of docs/decisions/2026-11-23-goal-fixes.md): the outside folders come from every tool call
+before the cut, the snapshot keeps uncommitted work and a git history that ends at the cut, a worktree's `.git`
+pointer is never copied, and an arm whose `claude -p` fails with no text runs once more.
 The grader gets the cut time and does not count facts that appear only after it (H4).
 """
 import argparse
@@ -40,7 +43,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 
@@ -427,8 +430,7 @@ Reply ONLY with JSON: {{"x": {{"owed_reply": "...", "next_action": "...", "wrong
 SNAP_BASE = "/tmp/pitstop-twin"
 SNAP_SKIP = ("node_modules", ".venv", "venv", "dist", "build", ".next", ".git", "__pycache__", ".turbo")
 SNAP_MAX_BYTES = 1_000_000
-EXT_MAX_FILES = 2000  # per cycle, over all outside folders
-EXT_TOOL_CALLS = 50
+EXT_MAX_FILES = 5000  # per cycle, over all outside folders
 # Outside paths never copied: system folders, other sessions' transcripts, whole home or Desktop folders.
 EXT_NEVER = ("/usr/", "/bin/", "/sbin/", "/System/", "/Library/", "/Applications/", "/opt/", "/dev/", "/etc/",
              "/var/folders/", "/private/etc/", "/private/var/")
@@ -462,6 +464,8 @@ def _copy_tree(src: Path, dest: Path, cut_ts: float, budget: List[int], recursiv
     for folder, dirs, files in walk:
         dirs[:] = [d for d in dirs if d not in SNAP_SKIP]
         for name in files:
+            if name == ".git":  # a worktree's pointer to the live repo, whose history goes past the cut
+                continue
             if budget[0] <= 0:
                 return
             rel = os.path.relpath(os.path.join(folder, name), src)
@@ -472,29 +476,52 @@ def _copy_tree(src: Path, dest: Path, cut_ts: float, budget: List[int], recursiv
 def snapshot(cwd: str, cut_ts: float, dest: Path) -> Tuple[str, str]:
     """The project at `cwd` as it was at `cut_ts`, copied to `dest`; returns (copied top folder, cwd inside it).
     In a git repo: tracked files from the last commit before the cut (git archive, the live repo is not touched),
-    plus untracked or ignored files under 1 MB last changed before the cut (specs, plans, ledgers). Elsewhere, or
-    with no commit before the cut: the files under `cwd` last changed before the cut (newer files are missing)."""
+    plus the working-tree version of tracked files and untracked or ignored files under 1 MB last changed before the
+    cut (uncommitted work, specs, plans, ledgers), and a git history that ends at that commit. Elsewhere, or with no
+    commit before the cut: the files under `cwd` last changed before the cut (newer files are missing)."""
     dest.mkdir(parents=True, exist_ok=True)
     top = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     top_dir = top.stdout.strip() if top.returncode == 0 else ""
-    sha = subprocess.run(["git", "-C", top_dir, "log", "--all", "-1", "--format=%H", "--before=@%d" % int(cut_ts)],
-                         capture_output=True, text=True).stdout.strip() if top_dir else ""
+    sha = ""
+    for refs in (["HEAD"], ["--all"]) if top_dir else ():  # this worktree's branch first, not a sibling's
+        sha = subprocess.run(["git", "-C", top_dir, "log", "-1", "--format=%H", "--before=@%d" % int(cut_ts)] + refs,
+                             capture_output=True, text=True).stdout.strip()
+        if sha:
+            break
     archive = subprocess.run(["git", "-C", top_dir, "archive", sha], capture_output=True) if sha else None
     if archive is None or archive.returncode != 0:
         _copy_tree(Path(cwd), dest, cut_ts, [EXT_MAX_FILES * 5])
         return cwd, str(dest)
     subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
     others = subprocess.run(["git", "-C", top_dir, "ls-files", "-o", "-z"], capture_output=True, text=True).stdout
-    for rel in filter(None, others.split("\0")):
+    changed = subprocess.run(["git", "-C", top_dir, "diff", "--name-only", "-z", sha], capture_output=True,
+                             text=True).stdout
+    for rel in filter(None, (others + changed).split("\0")):
         if not any(part in SNAP_SKIP for part in Path(rel).parts):
             _copy_file(Path(top_dir) / rel, dest / rel, cut_ts)
+    history(top_dir, sha, dest)
     return top_dir, str(dest / os.path.relpath(cwd, top_dir))
+
+
+def history(top_dir: str, sha: str, dest: Path) -> None:
+    """A git repo in `dest` whose only history is `sha` and its parents, on the branch of `top_dir`, with the index
+    at `sha`: `git log` and `git status` there show the repo at the cut. Best effort: no history if a step fails."""
+    branch = subprocess.run(["git", "-C", top_dir, "symbolic-ref", "--short", "HEAD"], capture_output=True,
+                            text=True).stdout.strip() or "main"
+    steps = [["init", "-q"], ["fetch", "-q", "--no-tags", "--no-write-fetch-head", top_dir, sha],
+             ["update-ref", "refs/heads/" + branch, sha], ["symbolic-ref", "HEAD", "refs/heads/" + branch],
+             ["reset", "-q"]]
+    for step in steps:
+        if subprocess.run(["git", "-C", str(dest)] + step, capture_output=True).returncode != 0:
+            shutil.rmtree(dest / ".git", ignore_errors=True)
+            return
 
 
 def outside_paths(texts: List[str], top: str, home: str, keep_out: List[str]) -> List[str]:
     """Existing absolute paths named in `texts` that lie outside the project folder `top` and are worth copying:
-    not system folders, not `keep_out` (transcript folders), not the home folder or one of its direct children."""
-    found = set()
+    not system folders, not `keep_out` (transcript folders), not the home folder or one of its direct children.
+    In the order they first appear, so the file budget goes to the texts given first."""
+    found: Dict[str, int] = {}
     for text in texts:
         for token in PATH_TOKEN.findall(text):
             path = os.path.expanduser(token.rstrip(".,:)/"))
@@ -508,10 +535,10 @@ def outside_paths(texts: List[str], top: str, home: str, keep_out: List[str]) ->
             if Path(real).parent == Path(home) or real == home or real.endswith("/bin/pitstop"):
                 continue  # the CLI the work called: the snapshot has its own copy
             if os.path.exists(real):
-                found.add(real)
+                found.setdefault(real, len(found))
     # A path inside another found path is copied with it.
-    ordered = sorted(found, key=len)
-    return [p for i, p in enumerate(ordered) if not any(p.startswith(q.rstrip("/") + "/") for q in ordered[:i])]
+    kept = [p for p in found if not any(p.startswith(q.rstrip("/") + "/") for q in found)]
+    return sorted(kept, key=found.get)
 
 
 def copy_outside(paths: List[str], ext_root: Path, cut_ts: float) -> Dict[str, str]:
@@ -562,8 +589,8 @@ def rewrite(text: str, mapping: Dict[str, str]) -> str:
     return pattern.sub(lambda m: pairs[m.group(0)], text)
 
 
-def recent_tool_inputs(rows: List[Tuple[bytes, Dict[str, Any]]], end: int, n: int) -> List[str]:
-    """The inputs of the last `n` tool calls before the cut, as JSON text."""
+def tool_inputs(rows: List[Tuple[bytes, Dict[str, Any]]], end: int) -> List[str]:
+    """The inputs of every tool call before the cut, newest first, as JSON text."""
     calls: List[str] = []
     for _, entry in reversed(rows[:end]):
         if entry.get("type") != "assistant":
@@ -571,8 +598,6 @@ def recent_tool_inputs(rows: List[Tuple[bytes, Dict[str, Any]]], end: int, n: in
         for b in reversed(_blocks(entry)):
             if b.get("type") == "tool_use":
                 calls.append(json.dumps(b.get("input"), ensure_ascii=False))
-                if len(calls) >= n:
-                    return calls
     return calls
 
 
@@ -658,6 +683,21 @@ def pitstop_cli_copy(dest: Path) -> str:
     return str(dest / "bin" / "pitstop")
 
 
+def failed_run(exc: RuntimeError) -> bool:
+    """`claude -p` exited with no JSON result (a crash, not max turns, a timeout or an API error result)."""
+    return str(exc).startswith("claude -p failed")
+
+
+def retry_once(attempt: Callable[[bool], Dict[str, Any]]) -> Dict[str, Any]:
+    """`attempt(False)`, and when it ends with no text because `claude -p` crashed (`failed_run`), `attempt(True)`
+    once more, marked `retried` with the first error."""
+    first = attempt(False)
+    if not first.get("no_text"):
+        return first
+    second = attempt(True)
+    return dict(second, retried=first.get("stopped"))
+
+
 def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, Any]:
     result_path = out / ("%s.json" % cycle.cycle_id)
     if result_path.exists():
@@ -693,7 +733,7 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     run_cwd = os.path.realpath(snap_cwd)
     home = str(Path.home())
     keep_out = [str(Path(d)) for d in projects_dirs(os.environ, Path.home())] + [str(ROOT)]
-    named = outside_paths([checkpoint_text] + recent_tool_inputs(rows, end, EXT_TOOL_CALLS), top, home, keep_out)
+    named = outside_paths([checkpoint_text] + tool_inputs(rows, end), top, home, keep_out)
     copies = copy_outside(named, snap_root / "_ext", cut_ts)
     copies[os.path.realpath(top)] = os.path.realpath(snap_root / "repo")
     mapping = {form: copy for real, copy in copies.items() for form in aliases(real, home)}
@@ -715,12 +755,14 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
     try:
         # The twin's own scratchpad and task output live under /tmp/claude-<uid>/<project folder>.
         scratch = Path(os.path.realpath("/tmp")) / ("claude-%d" % os.getuid()) / _sanitize(run_cwd)
-        for arm in ("N", "P"):
-            if arm == "P":  # P starts from the same files as N: N's edits, scratchpad and twin are gone
+
+        def run_arm(arm: str, retry: bool) -> Dict[str, Any]:
+            if arm == "P" or retry:  # the same files as N had: earlier edits, scratchpad and twins are gone
                 for path in twins:
                     remove_twin(path)
                 shutil.rmtree(snap_root)
                 shutil.copytree(pristine, snap_root, symlinks=True)
+                shutil.rmtree(logs_root / arm, ignore_errors=True)
             shutil.rmtree(scratch, ignore_errors=True)
             scratch.mkdir(parents=True)
             twin, path = write_twin(twin_rows, end, project_dir)
@@ -733,8 +775,13 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
             flags = ["--restricted", "--strict-mcp-config", "--mcp-config", arm_mcp(logs / "mcp.json"),
                      "--settings", arm_settings(), "--output-format", "json",
                      "--add-dir", str(snap_root), "--add-dir", str(project_dir), "--add-dir", str(scratch)]
-            compact = claude(["--resume", twin] + flags, run_cwd, config_dir,
-                             "/compact" if arm == "N" else P_COMPACT, env)
+            try:
+                compact = claude(["--resume", twin] + flags, run_cwd, config_dir,
+                                 "/compact" if arm == "N" else P_COMPACT, env)
+            except RuntimeError as exc:
+                if retry or not failed_run(exc):
+                    raise
+                return {"no_text": True, "stopped": str(exc)[:200]}
             cost[arm] += compact.get("total_cost_usd") or 0
             prompt = message
             resume_input = None
@@ -758,10 +805,16 @@ def continue_cycle(cycle: Cycle, cycles: List[Cycle], out: Path) -> Dict[str, An
                 if not text:
                     text, final, stop = last_text(path) or "(no reply)", False, reply.get("subtype") or "no result"
             except RuntimeError as exc:  # max turns, timeout, API error: grade the twin's last text (H3)
-                text, turns, final, stop = last_text(path) or "(no reply)", None, False, str(exc)[:200]
-            arms[arm] = {"reply": text, "final_reply": final, "stopped": stop, "turns": turns, "tools": tool_calls(path),
-                         "resume_tokens": resume_tokens(path), "asks": _jsonl(logs / "asks.jsonl"),
-                         "refused": _jsonl(logs / "refused.jsonl"), "resume_input": resume_input}
+                last = last_text(path)
+                if not last and not retry and failed_run(exc):
+                    return {"no_text": True, "stopped": str(exc)[:200]}
+                text, turns, final, stop = last or "(no reply)", None, False, str(exc)[:200]
+            return {"reply": text, "final_reply": final, "stopped": stop, "turns": turns, "tools": tool_calls(path),
+                    "resume_tokens": resume_tokens(path), "asks": _jsonl(logs / "asks.jsonl"),
+                    "refused": _jsonl(logs / "refused.jsonl"), "resume_input": resume_input}
+
+        for arm in ("N", "P"):
+            arms[arm] = retry_once(lambda retry, arm=arm: run_arm(arm, retry))
     finally:
         for path in twins:
             remove_twin(path)
@@ -832,6 +885,10 @@ def cmd_continue_summary(out: Path) -> None:
     lines = ["# Continuation test: pitstop (P) vs native compact (N)", "", "Cycles: %d" % len(results), ""]
     wins = {k: sum(1 for r in results if r["grade"]["winner"] == k) for k in ("N", "P", "tie")}
     lines.append("- Winner: P %d · N %d · tie %d" % (wins["P"], wins["N"], wins["tie"]))
+    lines.append("- P does not lose (wins + ties): %d of %d" % (wins["P"] + wins["tie"], len(results)))
+    retried = ["%s %s" % (r["cycle"], a) for r in results for a in ("N", "P") if r["arms"][a].get("retried")]
+    if retried:
+        lines.append("- Arms run again after a failed `claude -p`: %s" % ", ".join(retried))
     for arm in ("N", "P"):
         g = [r["grade"].get(arm) or {} for r in results]
         lines.append("- **%s**: owed reply dropped %d (of %d owed) · next action yes %d / partly %d / no %d · "

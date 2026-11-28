@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -137,6 +138,89 @@ class SnapshotTest(unittest.TestCase):
             copy = Path(mapping[str(src)])
             self.assertTrue((copy / "old.md").is_file())
             self.assertFalse((copy / "new.md").exists())
+
+    def test_outside_paths_follow_first_appearance_and_tool_inputs_take_every_call(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            tmp = os.path.realpath(tmp)
+            a, b = Path(tmp) / "x" / "y" / "a", Path(tmp) / "x" / "y" / "b"
+            for d in (a, b):
+                d.mkdir(parents=True)
+            self.assertEqual(twin.outside_paths(["%s" % b, "%s %s/f" % (a, b)], "/nope", "/home/me", []),
+                             [str(b), str(a)])
+        call = lambda i: (b"", {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "/p/%d" % i}}]}})
+        rows = [call(i) for i in range(120)]
+        inputs = twin.tool_inputs(rows, 100)
+        self.assertEqual(len(inputs), 100)
+        self.assertIn("/p/0", inputs[-1])
+        self.assertIn("/p/99", inputs[0])
+
+    def test_snapshot_keeps_uncommitted_work_and_history_up_to_the_cut(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, dest = Path(tmp) / "repo", Path(tmp) / "snap"
+            def git(*args, at=None):
+                env = dict(os.environ, GIT_COMMITTER_DATE="@%d" % (at or time.time()))
+                subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t"] + list(args),
+                               check=True, capture_output=True, env=env)
+            repo.mkdir()
+            git("init", "-q")
+            (repo / "a.txt").write_text("committed")
+            (repo / "b.txt").write_text("committed")
+            git("add", ".")
+            git("commit", "-qm", "one", at=time.time() - 600)
+            cut = time.time() - 200
+            (repo / "b.txt").write_text("edited after the cut")
+            git("commit", "-qam", "two")
+            (repo / "a.txt").write_text("edited before the cut")  # uncommitted at the cut
+            os.utime(repo / "a.txt", (time.time() - 300, time.time() - 300))
+            twin.snapshot(str(repo), cut, dest)
+            self.assertEqual((dest / "a.txt").read_text(), "edited before the cut")
+            self.assertEqual((dest / "b.txt").read_text(), "committed")
+            log = subprocess.run(["git", "-C", str(dest), "log", "--all", "--format=%s"], capture_output=True,
+                                 text=True).stdout.split()
+            self.assertEqual(log, ["one"])
+            self.assertFalse((dest / ".git" / "FETCH_HEAD").exists())  # it names the live repo
+            status = subprocess.run(["git", "-C", str(dest), "status", "--porcelain"], capture_output=True,
+                                    text=True).stdout
+            self.assertIn("a.txt", status)
+
+    def test_copied_worktree_has_no_git_pointer_to_the_live_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wt = Path(tmp) / "wt"
+            wt.mkdir()
+            (wt / ".git").write_text("gitdir: /live/repo/.git/worktrees/wt")
+            (wt / "f.py").write_text("x")
+            for path in (wt / ".git", wt / "f.py"):
+                os.utime(path, (time.time() - 120, time.time() - 120))
+            copy = Path(twin.copy_outside([str(wt)], Path(tmp) / "ext", time.time() - 60)[str(wt)])
+            self.assertTrue((copy / "f.py").is_file())
+            self.assertFalse((copy / ".git").exists())
+
+    def test_retry_once_runs_an_arm_again_only_when_it_has_no_text(self):
+        calls = []
+        def attempt(retry):
+            calls.append(retry)
+            return {"reply": "ok"} if retry else {"no_text": True, "stopped": "claude -p failed (1)"}
+        self.assertEqual(twin.retry_once(attempt), {"reply": "ok", "retried": "claude -p failed (1)"})
+        self.assertEqual(calls, [False, True])
+        self.assertEqual(twin.retry_once(lambda retry: {"reply": "first"}), {"reply": "first"})
+        self.assertTrue(twin.failed_run(RuntimeError("claude -p failed (1): Error: No deferred tool")))
+        self.assertFalse(twin.failed_run(RuntimeError("claude -p error (error_max_turns): ")))
+        self.assertFalse(twin.failed_run(RuntimeError("claude -p timeout after 1200s")))
+
+    def test_summary_shows_p_does_not_lose(self):
+        arm = {"tools": []}
+        results = [{"cycle": c, "kind": "code", "message": "m", "grade": {"winner": w, "N": {}, "P": {}},
+                    "arms": {"N": arm, "P": dict(arm, retried="e") if c == "c3" else arm},
+                    "cost": {"N": 0, "P": 0, "grade": 0}} for c, w in (("c1", "P"), ("c2", "tie"), ("c3", "N"))]
+        with tempfile.TemporaryDirectory() as tmp:
+            for r in results:
+                (Path(tmp) / ("%s.json" % r["cycle"])).write_text(json.dumps(r))
+            with open(os.devnull, "w") as null, unittest.mock.patch("sys.stdout", null):
+                twin.cmd_continue_summary(Path(tmp))
+            text = (Path(tmp) / "summary.md").read_text()
+        self.assertIn("P does not lose (wins + ties): 2 of 3", text)
+        self.assertIn("failed `claude -p`: c3 P", text)
 
     def test_grader_counts_a_missing_detail_only_if_the_real_session_used_it(self):
         prompt = " ".join(twin.CONT_GRADE_PROMPT.format(limit=twin.TOOL_INPUT_CHARS, cut="c", before="b", after="a",

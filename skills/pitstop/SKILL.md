@@ -190,6 +190,8 @@ Last reply to the user: SENT | NOT SENT (SENT only if the full reply is already 
   arguments.
 - Exact strings: absolute path or exact command of every script, command, draft or data the work made or relies
   on; copy what exists only in chat, an attachment or a temp folder.
+- Each open question and each pending Waggle case gets its id and its topic in a few words, and the last step
+  done or measured gets its exact numbers (sizes, counts, values), not "done" or "fixed".
 - Name the approved mockup (path + Waggle case id) and the feedback ledger file with its open ids when the work
   follows them.
 - Each count or status under Current state names its source and time (a file, a command output, a PR state as

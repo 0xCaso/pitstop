@@ -75,6 +75,11 @@ class MessagesTest(unittest.TestCase):
         self.assertIn("never call something missing or confirmed after a single failed search", text)
         self.assertLess(text.index("read the files the next action depends on"), text.index("Print exactly"))
 
+    def test_resume_context_names_open_items_and_checks_before_done(self):
+        text = resume_context(RECORD, "# cp", cli="/x/bin/pitstop")
+        self.assertIn("first reply names the open Waggle cases, open questions and files still to update", text)
+        self.assertIn("Never say a check passed or a thing is done unless you checked it in this session", text)
+
 
 class PreviousTranscriptTest(unittest.TestCase):
     def test_resume_context_sends_an_owed_reply_before_the_next_action(self):
